@@ -15,7 +15,39 @@ enum AppWorkspace {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Language {
+pub(crate) enum AppTheme {
+    Dark,
+    Light,
+}
+
+impl AppTheme {
+    fn from_setting(value: &str) -> Self {
+        if value == "light" {
+            Self::Light
+        } else {
+            Self::Dark
+        }
+    }
+
+    pub(crate) fn as_setting(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub(crate) fn label(self, language: Language) -> &'static str {
+        match (self, language) {
+            (Self::Dark, Language::English) => "Dark",
+            (Self::Dark, Language::Chinese) => "深色",
+            (Self::Light, Language::English) => "Light",
+            (Self::Light, Language::Chinese) => "浅色",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Language {
     English,
     Chinese,
 }
@@ -329,7 +361,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             install_cjk_font(&cc.egui_ctx);
-            install_style(&cc.egui_ctx);
+            install_style_for(&cc.egui_ctx, AppTheme::Dark);
             Ok(Box::new(CtfToolsApp::new()))
         }),
     )
@@ -362,15 +394,31 @@ fn install_cjk_font(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-fn install_style(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(18, 20, 24);
-    visuals.window_fill = egui::Color32::from_rgb(20, 23, 28);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(8, 10, 13);
-    visuals.selection.bg_fill = egui::Color32::from_rgb(36, 112, 160);
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(35, 39, 47);
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 53, 63);
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(45, 122, 170);
+pub(crate) fn install_style_for(ctx: &egui::Context, theme: AppTheme) {
+    let mut visuals = match theme {
+        AppTheme::Dark => egui::Visuals::dark(),
+        AppTheme::Light => egui::Visuals::light(),
+    };
+    match theme {
+        AppTheme::Dark => {
+            visuals.panel_fill = egui::Color32::from_rgb(18, 20, 24);
+            visuals.window_fill = egui::Color32::from_rgb(20, 23, 28);
+            visuals.extreme_bg_color = egui::Color32::from_rgb(8, 10, 13);
+            visuals.selection.bg_fill = egui::Color32::from_rgb(36, 112, 160);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(35, 39, 47);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 53, 63);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(45, 122, 170);
+        }
+        AppTheme::Light => {
+            visuals.panel_fill = egui::Color32::from_rgb(242, 245, 248);
+            visuals.window_fill = egui::Color32::from_rgb(250, 252, 254);
+            visuals.extreme_bg_color = egui::Color32::from_rgb(228, 234, 240);
+            visuals.selection.bg_fill = egui::Color32::from_rgb(35, 120, 170);
+            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(232, 237, 243);
+            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(220, 229, 238);
+            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(190, 220, 238);
+        }
+    }
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.style()).clone();
@@ -386,6 +434,7 @@ fn install_style(ctx: &egui::Context) {
 struct CtfToolsApp {
     registry: Option<OperationRegistry>,
     language: Language,
+    theme: AppTheme,
     workspace: AppWorkspace,
     launcher: launcher_ui::LauncherUiState,
     query: String,
@@ -399,11 +448,14 @@ struct CtfToolsApp {
     trace: Vec<String>,
     warnings: Vec<String>,
     last_status: String,
+    is_fullscreen: bool,
 }
 
 impl CtfToolsApp {
     fn new() -> Self {
         let registry = OperationRegistry::load_default().ok();
+        let launcher = launcher_ui::LauncherUiState::load();
+        let theme = AppTheme::from_setting(launcher.theme_setting());
         let selected_operation = registry
             .as_ref()
             .and_then(|registry| registry.operations().first())
@@ -416,8 +468,9 @@ impl CtfToolsApp {
         Self {
             registry,
             language: Language::English,
+            theme,
             workspace: AppWorkspace::Operations,
-            launcher: launcher_ui::LauncherUiState::load(),
+            launcher,
             query: String::new(),
             active_category: "all".to_string(),
             selected_operation,
@@ -429,6 +482,30 @@ impl CtfToolsApp {
             trace: Vec::new(),
             warnings: Vec::new(),
             last_status: "Ready".to_string(),
+            is_fullscreen: false,
+        }
+    }
+
+    fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Comma)) {
+            self.workspace = AppWorkspace::Launcher;
+            self.launcher
+                .set_status("Settings are available in the right panel");
+        }
+        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::M)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::W)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::H)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+        if ctx.input(|input| {
+            input.modifiers.command && input.modifiers.ctrl && input.key_pressed(egui::Key::F)
+        }) {
+            self.is_fullscreen = !self.is_fullscreen;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.is_fullscreen));
         }
     }
 
@@ -673,6 +750,8 @@ impl CtfToolsApp {
 
 impl eframe::App for CtfToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        install_style_for(ctx, self.theme);
+        self.handle_global_shortcuts(ctx);
         let language = self.language;
         let selected_spec = self.registry.as_ref().and_then(|registry| {
             self.selected_operation

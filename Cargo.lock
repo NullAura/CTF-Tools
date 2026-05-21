@@ -862,6 +862,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ctf-core",
+ "ctf-launcher",
  "ctf-runner",
  "serde_json",
 ]

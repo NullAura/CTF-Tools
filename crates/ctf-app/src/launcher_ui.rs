@@ -1,8 +1,9 @@
-use super::{CtfToolsApp, Language};
+use super::{AppTheme, CtfToolsApp, Language, install_style_for};
 use ctf_launcher::{
     ALL_ID, Category, Environment, EnvironmentRegistry, EnvironmentType, FAVORITES_ID,
-    LauncherSettings, LauncherStore, LauncherTool, RECENT_ID, ToolType, category_counts,
-    filter_tools, launch_tool, record_recent, scan_all_environments,
+    LauncherSettings, LauncherStore, LauncherTool, RECENT_ID, ToolType, bind_javafx_tools,
+    bootstrap_from_th_tools, category_counts, filter_tools, launch_tool, record_recent,
+    scan_all_environments,
 };
 use eframe::egui;
 
@@ -49,6 +50,14 @@ impl LauncherUiState {
             manual_env: EnvEditorState::default(),
             status: "Ready".to_string(),
         }
+    }
+
+    pub fn theme_setting(&self) -> &str {
+        self.settings.theme.as_str()
+    }
+
+    pub fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
     }
 
     fn visible_tools(&self) -> Vec<LauncherTool> {
@@ -185,6 +194,88 @@ impl LauncherUiState {
             "{}: {}",
             text(language, "Environments scanned", "环境扫描完成"),
             self.environments.environments.len()
+        );
+    }
+
+    fn import_asutools_data(&mut self, language: Language) {
+        match self.store.import_asutools_data() {
+            Ok(summary) => {
+                if summary.source_dir.is_none() {
+                    self.status = text(
+                        language,
+                        "No asuTools data directory found",
+                        "未找到 asuTools 数据目录",
+                    )
+                    .to_string();
+                    return;
+                }
+                self.tools = self.store.load_tools();
+                self.categories = self.store.load_categories();
+                self.environments = self.store.load_environments();
+                self.settings = self.store.load_settings();
+                self.selected_tool = self.tools.first().map(|tool| tool.id.clone());
+                if let Some(tool) = self.selected_tool() {
+                    self.editor = ToolEditorState::from_tool(tool);
+                }
+                self.status = format!(
+                    "{}: {} tools, {} categories, {} envs",
+                    text(language, "Imported asuTools data", "已导入 asuTools 数据"),
+                    summary.tools,
+                    summary.categories,
+                    summary.environments
+                );
+            }
+            Err(error) => self.status = format!("Import failed: {error}"),
+        }
+    }
+
+    fn bootstrap_th_tools(&mut self, language: Language) {
+        match bootstrap_from_th_tools(&self.store) {
+            Ok(summary) => {
+                self.tools = self.store.load_tools();
+                self.categories = self.store.load_categories();
+                self.environments = self.store.load_environments();
+                self.selected_tool = self.tools.first().map(|tool| tool.id.clone());
+                if let Some(tool) = self.selected_tool() {
+                    self.editor = ToolEditorState::from_tool(tool);
+                }
+                self.status = format!(
+                    "{}: {} tools, {} categories, {} envs",
+                    text(
+                        language,
+                        "TH_Tools bootstrap complete",
+                        "TH_Tools 初始化完成"
+                    ),
+                    summary.tools,
+                    summary.categories,
+                    summary.environments
+                );
+            }
+            Err(error) => self.status = format!("TH_Tools bootstrap failed: {error}"),
+        }
+    }
+
+    fn bind_javafx_tools(&mut self, language: Language) {
+        let changed = bind_javafx_tools(&mut self.tools, &self.environments.environments);
+        if changed == 0 {
+            self.status = text(
+                language,
+                "No JavaFX tools were changed",
+                "没有需要绑定的 JavaFX 工具",
+            )
+            .to_string();
+            return;
+        }
+        if let Err(error) = self.store.save_tools(&self.tools) {
+            self.status = format!("JavaFX binding save failed: {error}");
+            return;
+        }
+        if let Some(tool) = self.selected_tool() {
+            self.editor = ToolEditorState::from_tool(tool);
+        }
+        self.status = format!(
+            "{}: {changed}",
+            text(language, "JavaFX tools bound", "已绑定 JavaFX 工具")
         );
     }
 
@@ -370,6 +461,20 @@ impl Default for EnvEditorState {
 }
 
 impl CtfToolsApp {
+    fn set_app_theme(&mut self, ctx: &egui::Context, theme: AppTheme) {
+        if self.theme == theme {
+            return;
+        }
+        self.theme = theme;
+        self.launcher.settings.theme = theme.as_setting().to_string();
+        if let Err(error) = self.launcher.store.save_settings(&self.launcher.settings) {
+            self.launcher.status = format!("Theme save failed: {error}");
+            return;
+        }
+        install_style_for(ctx, theme);
+        self.launcher.status = "Theme updated".to_string();
+    }
+
     pub(super) fn render_launcher(&mut self, ctx: &egui::Context) {
         let language = self.language;
         self.handle_launcher_shortcuts(ctx);
@@ -382,7 +487,7 @@ impl CtfToolsApp {
         egui::SidePanel::right("launcher_editor")
             .resizable(true)
             .default_width(390.0)
-            .show(ctx, |ui| self.render_launcher_editor(ui, language));
+            .show(ctx, |ui| self.render_launcher_editor(ui, ctx, language));
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.render_launcher_main(ui, ctx, language);
@@ -418,6 +523,13 @@ impl CtfToolsApp {
     }
 
     fn handle_launcher_shortcuts(&mut self, ctx: &egui::Context) {
+        let typing = ctx.wants_keyboard_input();
+        if ctx.input(|input| {
+            input.modifiers.command
+                && (input.key_pressed(egui::Key::K) || input.key_pressed(egui::Key::F))
+        }) {
+            ctx.memory_mut(|memory| memory.request_focus(egui::Id::new("launcher_search")));
+        }
         if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::N)) {
             self.launcher.start_new_tool();
         }
@@ -426,18 +538,90 @@ impl CtfToolsApp {
         {
             self.launcher.editor = ToolEditorState::from_tool(&tool);
         }
-        if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::D)) {
+        if ctx.input(|input| {
+            input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::D)
+        }) {
             self.launcher.toggle_favorite(self.language);
         }
-        if ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
+        if !typing && ctx.input(|input| input.key_pressed(egui::Key::Enter)) {
             self.launcher.launch_selected(self.language);
         }
-        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        if !typing && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.launcher.query.clear();
         }
-        if ctx.input(|input| input.key_pressed(egui::Key::Backspace)) {
+        if !typing && ctx.input(|input| input.key_pressed(egui::Key::Backspace)) {
             self.launcher.delete_selected(self.language);
         }
+        if ctx.input(|input| {
+            input.modifiers.command
+                && input.modifiers.shift
+                && input.key_pressed(egui::Key::OpenBracket)
+        }) {
+            self.select_launcher_category_offset(-1);
+        }
+        if ctx.input(|input| {
+            input.modifiers.command
+                && input.modifiers.shift
+                && input.key_pressed(egui::Key::CloseBracket)
+        }) {
+            self.select_launcher_category_offset(1);
+        }
+        for (index, key) in [
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+            egui::Key::Num6,
+            egui::Key::Num7,
+            egui::Key::Num8,
+            egui::Key::Num9,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if ctx.input(|input| input.modifiers.command && input.key_pressed(key)) {
+                self.select_launcher_category_index(index);
+            }
+        }
+    }
+
+    fn launcher_category_order(&self) -> Vec<String> {
+        let mut order = vec![
+            ALL_ID.to_string(),
+            FAVORITES_ID.to_string(),
+            RECENT_ID.to_string(),
+        ];
+        order.extend(
+            self.launcher
+                .categories
+                .iter()
+                .map(|category| category.id.clone()),
+        );
+        order
+    }
+
+    fn select_launcher_category_index(&mut self, index: usize) {
+        if let Some(category) = self.launcher_category_order().get(index) {
+            self.launcher.active_category = category.clone();
+            if let Some(tool) = self.launcher.visible_tools().first() {
+                self.launcher.select_tool(&tool.id);
+            }
+        }
+    }
+
+    fn select_launcher_category_offset(&mut self, offset: isize) {
+        let order = self.launcher_category_order();
+        if order.is_empty() {
+            return;
+        }
+        let current = order
+            .iter()
+            .position(|category| category == &self.launcher.active_category)
+            .unwrap_or_default();
+        let len = order.len() as isize;
+        let next = (current as isize + offset).rem_euclid(len) as usize;
+        self.select_launcher_category_index(next);
     }
 
     fn render_launcher_categories(&mut self, ui: &mut egui::Ui, language: Language) {
@@ -517,11 +701,13 @@ impl CtfToolsApp {
         ));
         ui.add_space(4.0);
         ui.add(
-            egui::TextEdit::singleline(&mut self.launcher.query).hint_text(text(
-                language,
-                "Search tools, tags, path...",
-                "搜索工具、标签、路径...",
-            )),
+            egui::TextEdit::singleline(&mut self.launcher.query)
+                .id_salt("launcher_search")
+                .hint_text(text(
+                    language,
+                    "Search tools, tags, path...",
+                    "搜索工具、标签、路径...",
+                )),
         );
         ui.separator();
 
@@ -581,11 +767,7 @@ impl CtfToolsApp {
                 let selected = self.launcher.selected_tool.as_deref() == Some(tool.id.as_str());
                 let response = egui::Frame::group(ui.style())
                     .inner_margin(egui::Margin::same(10))
-                    .fill(if selected {
-                        egui::Color32::from_rgb(32, 76, 108)
-                    } else {
-                        egui::Color32::from_rgb(20, 24, 30)
-                    })
+                    .fill(launcher_card_fill(selected, self.theme))
                     .show(ui, |ui| {
                         ui.set_width(card_width);
                         ui.horizontal(|ui| {
@@ -681,7 +863,12 @@ impl CtfToolsApp {
         });
     }
 
-    fn render_launcher_editor(&mut self, ui: &mut egui::Ui, language: Language) {
+    fn render_launcher_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        language: Language,
+    ) {
         ui.heading(text(language, "Tool Editor", "工具编辑"));
         ui.add_space(6.0);
         ui.horizontal(|ui| {
@@ -760,6 +947,9 @@ impl CtfToolsApp {
         ui.collapsing(text(language, "Environments", "环境"), |ui| {
             self.render_environment_settings(ui, language);
         });
+        ui.collapsing(text(language, "General", "通用"), |ui| {
+            self.render_launcher_general_settings(ui, ctx, language);
+        });
         ui.collapsing(text(language, "About asuTools Port", "关于 asuTools 搬运"), |ui| {
             ui.label(text(
                 language,
@@ -769,6 +959,59 @@ impl CtfToolsApp {
             ui.label("Source: https://github.com/lsdogXG/asutools · MIT");
             ui.label(format!("Theme setting: {}", self.launcher.settings.theme));
         });
+    }
+
+    fn render_launcher_general_settings(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        language: Language,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(text(language, "Theme", "主题"));
+            let mut selected = self.theme;
+            egui::ComboBox::from_id_salt("launcher_theme")
+                .selected_text(selected.label(language))
+                .show_ui(ui, |ui| {
+                    for theme in [AppTheme::Dark, AppTheme::Light] {
+                        ui.selectable_value(&mut selected, theme, theme.label(language));
+                    }
+                });
+            if selected != self.theme {
+                self.set_app_theme(ctx, selected);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button(text(language, "Import asuTools Data", "导入 asuTools 数据"))
+                .clicked()
+            {
+                self.launcher.import_asutools_data(language);
+                self.theme = AppTheme::from_setting(self.launcher.theme_setting());
+                install_style_for(ctx, self.theme);
+            }
+            if ui
+                .button(text(language, "Bootstrap TH_Tools", "初始化 TH_Tools"))
+                .clicked()
+            {
+                self.launcher.bootstrap_th_tools(language);
+            }
+            if ui
+                .button(text(language, "Bind JavaFX JARs", "绑定 JavaFX JAR"))
+                .clicked()
+            {
+                self.launcher.bind_javafx_tools(language);
+            }
+        });
+        ui.label(
+            egui::RichText::new(text(
+                language,
+                "Shortcuts: Cmd+K search, Cmd+N new, Cmd+E edit, Cmd+Shift+D favorite, Enter launch, Esc clear search, Cmd+1..9 switch categories.",
+                "快捷键：Cmd+K 搜索、Cmd+N 新增、Cmd+E 编辑、Cmd+Shift+D 收藏、Enter 启动、Esc 清空搜索、Cmd+1..9 切换分类。",
+            ))
+            .small()
+            .color(egui::Color32::from_rgb(145, 158, 174)),
+        );
     }
 
     fn render_env_combo(&mut self, ui: &mut egui::Ui) {
@@ -799,13 +1042,20 @@ impl CtfToolsApp {
                     ToolType::Java => &[EnvironmentType::Java],
                     _ => &[],
                 };
-                for env in self
+                let mut envs = self
                     .launcher
                     .environments
                     .environments
                     .iter()
                     .filter(|env| wanted.is_empty() || wanted.contains(&env.env_type))
-                {
+                    .collect::<Vec<_>>();
+                envs.sort_by(|left, right| {
+                    right
+                        .javafx
+                        .cmp(&left.javafx)
+                        .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+                });
+                for env in envs {
                     let suffix = if env.javafx { " +FX" } else { "" };
                     ui.selectable_value(
                         &mut self.launcher.editor.env_id,
@@ -927,6 +1177,15 @@ fn split_tags(tags: &str) -> Vec<String> {
         .filter(|tag| !tag.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+fn launcher_card_fill(selected: bool, theme: AppTheme) -> egui::Color32 {
+    match (selected, theme) {
+        (true, AppTheme::Dark) => egui::Color32::from_rgb(32, 76, 108),
+        (false, AppTheme::Dark) => egui::Color32::from_rgb(20, 24, 30),
+        (true, AppTheme::Light) => egui::Color32::from_rgb(202, 228, 244),
+        (false, AppTheme::Light) => egui::Color32::from_rgb(248, 250, 252),
+    }
 }
 
 fn new_id(prefix: &str) -> String {

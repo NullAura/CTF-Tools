@@ -12,5 +12,6 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 ctf-core = { path = "../ctf-core" }
+ctf-launcher = { path = "../ctf-launcher" }
 ctf-runner = { path = "../ctf-runner" }
 serde_json.workspace = true

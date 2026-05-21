@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -225,6 +225,50 @@ impl LauncherStore {
             .with_context(|| format!("create launcher data dir {}", self.data_dir.display()))
     }
 
+    pub fn import_asutools_data(&self) -> Result<ImportSummary> {
+        let Some(source_dir) = find_asutools_data_dir() else {
+            return Ok(ImportSummary::default());
+        };
+        self.ensure_data_dir()?;
+
+        let mut summary = ImportSummary {
+            source_dir: Some(source_dir.clone()),
+            ..ImportSummary::default()
+        };
+
+        let tools: Vec<LauncherTool> = read_json(&source_dir.join("tools.json"), Vec::new());
+        if !tools.is_empty() {
+            self.save_tools(&tools)?;
+            summary.tools = tools.len();
+        }
+
+        let categories: Vec<Category> = read_json(&source_dir.join("categories.json"), Vec::new());
+        if !categories.is_empty() {
+            self.save_categories(&categories)?;
+            summary.categories = categories.len();
+        }
+
+        let environments: EnvironmentRegistry = read_json(
+            &source_dir.join("environments.json"),
+            EnvironmentRegistry::default(),
+        );
+        if !environments.environments.is_empty()
+            || !environments.defaults.python.is_empty()
+            || !environments.defaults.java.is_empty()
+        {
+            summary.environments = environments.environments.len();
+            self.save_environments(&environments)?;
+        }
+
+        let settings: LauncherSettings = read_json(
+            &source_dir.join("settings.json"),
+            LauncherSettings::default(),
+        );
+        self.save_settings(&settings)?;
+        summary.settings = true;
+        Ok(summary)
+    }
+
     pub fn load_tools(&self) -> Vec<LauncherTool> {
         read_json(&self.data_dir.join("tools.json"), Vec::new())
     }
@@ -285,6 +329,24 @@ impl Default for LauncherStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportSummary {
+    pub source_dir: Option<PathBuf>,
+    pub tools: usize,
+    pub categories: usize,
+    pub environments: usize,
+    pub settings: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BootstrapSummary {
+    pub tools: usize,
+    pub categories: usize,
+    pub environments: usize,
+    pub python_default: String,
+    pub java_default: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,6 +511,259 @@ pub fn category_counts(tools: &[LauncherTool]) -> BTreeMap<String, usize> {
         *counts.entry(tool.category.clone()).or_insert(0) += 1;
     }
     counts
+}
+
+pub fn bootstrap_from_th_tools(store: &LauncherStore) -> Result<BootstrapSummary> {
+    let Some(home) = home_dir() else {
+        return Ok(BootstrapSummary::default());
+    };
+    bootstrap_from_th_tools_root(
+        store,
+        &home
+            .join("Workspace")
+            .join("security")
+            .join("tools")
+            .join("TH_Tools"),
+    )
+}
+
+pub fn bootstrap_from_th_tools_root(
+    store: &LauncherStore,
+    th_root: &Path,
+) -> Result<BootstrapSummary> {
+    let categories = migrate_th_categories(th_root)?;
+    let tools = migrate_th_tools(th_root)?;
+    let environments = scan_all_environments();
+    let defaults = default_environment_ids(&environments);
+
+    if !categories.is_empty() {
+        store.save_categories(&categories)?;
+    }
+    if !tools.is_empty() {
+        store.save_tools(&tools)?;
+    }
+    store.save_environments(&EnvironmentRegistry {
+        environments: environments.clone(),
+        defaults: defaults.clone(),
+    })?;
+
+    Ok(BootstrapSummary {
+        tools: tools.len(),
+        categories: categories.len(),
+        environments: environments.len(),
+        python_default: defaults.python,
+        java_default: defaults.java,
+    })
+}
+
+pub fn migrate_th_categories(th_root: &Path) -> Result<Vec<Category>> {
+    let path = th_root.join("config/categories.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let value = read_value(&path)?;
+    let entries = if let Some(array) = value.as_array() {
+        array.clone()
+    } else {
+        value
+            .get("categories")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let categories = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let name = value
+                .as_str()
+                .or_else(|| value.get("name").and_then(Value::as_str))?
+                .trim();
+            if name.is_empty() {
+                return None;
+            }
+            Some(Category {
+                id: name.to_string(),
+                name: name.to_string(),
+                order: index as i64,
+            })
+        })
+        .collect();
+    Ok(categories)
+}
+
+pub fn migrate_th_tools(th_root: &Path) -> Result<Vec<LauncherTool>> {
+    let path = th_root.join("config/tools.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let value = read_value(&path)?;
+    let entries = if let Some(array) = value.as_array() {
+        array.clone()
+    } else {
+        value
+            .get("tools")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let tools = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if name.trim().is_empty() {
+                return None;
+            }
+            let raw_path = value
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let path = if raw_path.starts_with("/tools/") {
+                th_root
+                    .join(raw_path.trim_start_matches('/'))
+                    .display()
+                    .to_string()
+            } else {
+                raw_path.to_string()
+            };
+            Some(LauncherTool {
+                id: format!("th-{:08x}", stable_hash(&format!("{index}:{name}:{path}"))),
+                name: name.to_string(),
+                tool_type: map_th_tool_type(
+                    value
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ),
+                path,
+                category: value
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                env_id: None,
+                args: value
+                    .get("params")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                tags: value
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(Value::as_str)
+                            .map(ToString::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                description: value
+                    .get("group")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                favorite: false,
+                last_used: 0,
+            })
+        })
+        .collect();
+    Ok(tools)
+}
+
+pub fn default_environment_ids(environments: &[Environment]) -> EnvironmentDefaults {
+    let python = environments
+        .iter()
+        .find(|env| {
+            env.env_type == EnvironmentType::Python && env.tags.iter().any(|tag| tag == "brew")
+        })
+        .or_else(|| {
+            environments
+                .iter()
+                .find(|env| env.env_type == EnvironmentType::Python)
+        })
+        .or_else(|| {
+            environments
+                .iter()
+                .find(|env| matches!(env.env_type, EnvironmentType::Venv | EnvironmentType::Conda))
+        })
+        .map(|env| env.id.clone())
+        .unwrap_or_default();
+    let java = environments
+        .iter()
+        .find(|env| env.env_type == EnvironmentType::Java)
+        .map(|env| env.id.clone())
+        .unwrap_or_default();
+    EnvironmentDefaults { python, java }
+}
+
+pub fn jar_uses_javafx(path: impl AsRef<Path>) -> bool {
+    let path = path.as_ref();
+    if !path.exists() || path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+        return false;
+    }
+
+    if let Ok(output) = Command::new("unzip").arg("-Z1").arg(path).output()
+        && output.status.success()
+    {
+        let names = String::from_utf8_lossy(&output.stdout);
+        if names.lines().any(|line| {
+            let lower = line.to_lowercase();
+            lower.starts_with("javafx/") || lower.contains("/javafx/")
+        }) {
+            return true;
+        }
+    }
+
+    if let Ok(output) = Command::new("unzip").arg("-p").arg(path).output()
+        && output.status.success()
+    {
+        let data = output.stdout;
+        if data
+            .windows("javafx/".len())
+            .any(|window| window == b"javafx/")
+            || data
+                .windows("javafx".len())
+                .any(|window| window.eq_ignore_ascii_case(b"javafx"))
+        {
+            return true;
+        }
+    }
+
+    fs::read(path)
+        .map(|data| {
+            data.windows("javafx/".len())
+                .any(|window| window == b"javafx/")
+                || data
+                    .windows("javafx".len())
+                    .any(|window| window.eq_ignore_ascii_case(b"javafx"))
+        })
+        .unwrap_or(false)
+}
+
+pub fn bind_javafx_tools(tools: &mut [LauncherTool], environments: &[Environment]) -> usize {
+    let Some(fx_env) = environments
+        .iter()
+        .find(|env| env.env_type == EnvironmentType::Java && env.javafx)
+    else {
+        return 0;
+    };
+    let mut changed = 0;
+    for tool in tools
+        .iter_mut()
+        .filter(|tool| tool.tool_type == ToolType::Java)
+    {
+        if jar_uses_javafx(&tool.path) && tool.env_id.as_deref() != Some(fx_env.id.as_str()) {
+            tool.env_id = Some(fx_env.id.clone());
+            changed += 1;
+        }
+    }
+    changed
 }
 
 pub fn scan_all_environments() -> Vec<Environment> {
@@ -644,7 +959,14 @@ pub fn scan_java() -> Vec<Environment> {
                 .and_then(|value| value.to_str())
                 .unwrap_or("java")
                 .to_string();
-            if let Some(env) = make_java_env(&home, &name, vec!["jdk".to_string()]) {
+            let tags = if root.ends_with("opt") {
+                vec!["jdk".to_string(), "brew".to_string()]
+            } else if root.ends_with(".jdks") {
+                vec!["jdk".to_string(), "jetbrains".to_string()]
+            } else {
+                vec!["jdk".to_string()]
+            };
+            if let Some(env) = make_java_env(&home, &name, tags) {
                 output.push(env);
             }
         }
@@ -686,14 +1008,25 @@ fn scan_workspace_jdks(root: &Path, output: &mut Vec<Environment>) {
             {
                 let resolved = path.canonicalize().unwrap_or_else(|_| path.clone());
                 if seen.insert(resolved) {
-                    let hint = path
+                    let folder = path
                         .parent()
                         .and_then(Path::parent)
                         .and_then(Path::file_name)
                         .and_then(|value| value.to_str())
-                        .unwrap_or("bundled-java");
+                        .unwrap_or("Java");
+                    let project = path
+                        .ancestors()
+                        .skip_while(|ancestor| {
+                            ancestor.file_name().and_then(|value| value.to_str())
+                                != Some("Java_path")
+                        })
+                        .nth(1)
+                        .and_then(Path::file_name)
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("bundled");
+                    let hint = format!("{folder} ({project})");
                     if let Some(env) =
-                        make_java_env(&path, hint, vec!["jdk".to_string(), "bundled".to_string()])
+                        make_java_env(&path, &hint, vec!["jdk".to_string(), "bundled".to_string()])
                     {
                         output.push(env);
                     }
@@ -813,6 +1146,41 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path, default: T) -> T {
         return default;
     };
     serde_json::from_str(&text).unwrap_or(default)
+}
+
+fn read_value(path: &Path) -> Result<Value> {
+    let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))
+}
+
+fn find_asutools_data_dir() -> Option<PathBuf> {
+    let home = home_dir()?;
+    [
+        home.join("Library/Application Support/asuTools"),
+        home.join("Library/Application Support/asutools"),
+    ]
+    .into_iter()
+    .find(|path| path.is_dir())
+}
+
+fn map_th_tool_type(value: &str) -> ToolType {
+    match value {
+        "JAVA8" | "JAVA11" => ToolType::Java,
+        "Python" => ToolType::Python,
+        "GUI应用" => ToolType::Gui,
+        "Shell脚本" | "命令行" => ToolType::Shell,
+        "网页" => ToolType::Url,
+        _ => ToolType::Shell,
+    }
+}
+
+fn stable_hash(value: &str) -> u32 {
+    let mut hash = 0x811c9dc5u32;
+    for byte in value.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    hash
 }
 
 fn open_target(target: &str) -> Result<()> {
@@ -942,11 +1310,6 @@ fn default_theme() -> String {
     "dark".to_string()
 }
 
-#[allow(dead_code)]
-fn os_string(value: impl Into<OsString>) -> OsString {
-    value.into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1030,6 +1393,77 @@ mod tests {
         let tool: LauncherTool = serde_json::from_str(text).unwrap();
         assert_eq!(tool.tool_type, ToolType::Python);
         assert_eq!(tool.env_id.as_deref(), Some("venv-sqlmap"));
+    }
+
+    #[test]
+    fn migrates_th_tools_schema() {
+        let root = std::env::temp_dir().join(format!(
+            "ctf-launcher-th-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let config = root.join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("categories.json"),
+            r#"[{"name":"Web"}, "Crypto"]"#,
+        )
+        .unwrap();
+        fs::write(
+            config.join("tools.json"),
+            r#"{"tools":[{"name":"FX Tool","type":"JAVA8","path":"/tools/fx.jar","category":"Web","params":"--debug","tags":["javafx"],"group":"gui"}]}"#,
+        )
+        .unwrap();
+
+        let categories = migrate_th_categories(&root).unwrap();
+        let tools = migrate_th_tools(&root).unwrap();
+        assert_eq!(categories.len(), 2);
+        assert_eq!(tools[0].tool_type, ToolType::Java);
+        assert!(tools[0].path.ends_with("tools/fx.jar"));
+        assert_eq!(tools[0].args, "--debug");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn binds_javafx_tools_to_fx_environment() {
+        let dir = std::env::temp_dir().join(format!(
+            "ctf-launcher-fx-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("fx.jar");
+        fs::write(&jar, b"constant-pool javafx/application/Application").unwrap();
+        let mut tools = vec![LauncherTool {
+            id: "j".to_string(),
+            name: "JavaFX".to_string(),
+            tool_type: ToolType::Java,
+            path: jar.display().to_string(),
+            category: String::new(),
+            env_id: None,
+            args: String::new(),
+            tags: Vec::new(),
+            description: String::new(),
+            favorite: false,
+            last_used: 0,
+        }];
+        let envs = vec![Environment {
+            id: "java-fx".to_string(),
+            name: "Java FX".to_string(),
+            env_type: EnvironmentType::Java,
+            path: "/tmp/jdk".to_string(),
+            version: "8".to_string(),
+            source: "auto".to_string(),
+            tags: vec!["javafx".to_string()],
+            javafx: true,
+        }];
+        assert_eq!(bind_javafx_tools(&mut tools, &envs), 1);
+        assert_eq!(tools[0].env_id.as_deref(), Some("java-fx"));
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn tool(
