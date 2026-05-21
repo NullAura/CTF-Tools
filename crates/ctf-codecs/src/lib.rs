@@ -612,8 +612,8 @@ fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Oper
     }
 
     candidates.sort_by(|a: &AutoCandidate, b| b.score.total_cmp(&a.score));
-    let value = serde_json_like_candidates(&candidates);
-    Ok(single_output("json", "auto", value))
+    let value = format_auto_decode_candidates(&candidates);
+    Ok(single_output("text", "auto", value))
 }
 
 fn push_codepoint(out: &mut String, hex: &str) -> Result<()> {
@@ -1404,19 +1404,26 @@ fn score_text(value: &str) -> f32 {
     score
 }
 
-fn serde_json_like_candidates(candidates: &[AutoCandidate]) -> String {
-    let items = candidates
+fn format_auto_decode_candidates(candidates: &[AutoCandidate]) -> String {
+    if candidates.is_empty() {
+        return "No confident decode candidates found.".to_string();
+    }
+
+    candidates
         .iter()
         .take(8)
-        .map(|candidate| {
+        .enumerate()
+        .map(|(index, candidate)| {
             format!(
-                "{{\n    \"path\": {:?},\n    \"score\": {:.3},\n    \"value\": {:?}\n  }}",
-                candidate.path, candidate.score, candidate.value
+                "Candidate #{number}\nSteps: {path}\nScore: {score:.3}\nResult:\n{value}",
+                number = index + 1,
+                path = candidate.path,
+                score = candidate.score,
+                value = candidate.value,
             )
         })
         .collect::<Vec<_>>()
-        .join(",\n  ");
-    format!("{{\n  \"candidates\": [\n  {items}\n  ]\n}}")
+        .join("\n\n")
 }
 
 fn dummy_operation(id: &str) -> OperationSpec {
@@ -1618,8 +1625,11 @@ mod tests {
     fn auto_decode_finds_base64_flag() {
         let response = auto_decode(&dummy_spec(), &request("auto.decode", "ZmxhZ3t0ZXN0fQ=="))
             .expect("auto decode");
-        assert!(response.outputs[0].value.contains("flag{test}"));
-        assert!(response.outputs[0].value.contains("base64.decode"));
+        let output = &response.outputs[0];
+        assert_eq!(output.kind, "text");
+        assert!(output.value.contains("Result:\nflag{test}"));
+        assert!(output.value.contains("Steps: base64.decode"));
+        assert!(!output.value.contains("\"candidates\""));
     }
 
     #[test]
