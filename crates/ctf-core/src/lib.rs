@@ -330,6 +330,22 @@ fn default_registry_path() -> PathBuf {
         return cwd_path;
     }
 
+    if let Ok(exe_path) = env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        let executable_relative_path = exe_dir.join("registry/operations.toml");
+        if executable_relative_path.exists() {
+            return executable_relative_path;
+        }
+
+        if let Some(contents_dir) = exe_dir.parent() {
+            let macos_app_resource_path = contents_dir.join("Resources/registry/operations.toml");
+            if macos_app_resource_path.exists() {
+                return macos_app_resource_path;
+            }
+        }
+    }
+
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../registry/operations.toml")
         .components()
