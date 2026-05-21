@@ -873,6 +873,7 @@ dependencies = [
  "ctf-core",
  "data-encoding",
  "hex",
+ "serde_json",
  "urlencoding",
 ]
 
@@ -946,6 +947,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

@@ -22,6 +22,8 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("ascii.encode", ascii_encode);
     runner.register_handler("hex.decode", hex_decode);
     runner.register_handler("hex.encode", hex_encode);
+    runner.register_handler("radix.convert", radix_convert);
+    runner.register_handler("xor.single_byte_bruteforce", xor_single_byte_bruteforce);
     runner.register_handler("auto.decode", auto_decode);
 }
 
@@ -183,6 +185,68 @@ fn hex_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
     ))
 }
 
+fn radix_convert(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let parsed = parse_radix_request(&request.input_text()?)?;
+    let number = u128::from_str_radix(&parsed.value, parsed.from).map_err(|error| {
+        CtfError::InvalidInput(format!("invalid base{} integer: {error}", parsed.from))
+    })?;
+    let value = serde_json::json!({
+        "input": parsed.value,
+        "from": parsed.from,
+        "to": parsed.to,
+        "converted": format_radix(number, parsed.to),
+        "base2": format_radix(number, 2),
+        "base8": format_radix(number, 8),
+        "base10": number.to_string(),
+        "base16": format_radix(number, 16),
+    });
+    json_output("radix", value)
+}
+
+fn xor_single_byte_bruteforce(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let bytes = if request.input.kind == "text" {
+        parse_hex_or_raw(&request.input.value)
+    } else {
+        request.input_bytes()?
+    };
+    if bytes.is_empty() {
+        return Err(CtfError::InvalidInput("input is empty".to_string()));
+    }
+
+    let mut candidates = (0u8..=255)
+        .map(|key| {
+            let decoded = bytes.iter().map(|byte| byte ^ key).collect::<Vec<_>>();
+            let text = bytes_to_lossy_text(&decoded);
+            let score = score_xor_plaintext(&decoded, &text);
+            serde_json::json!({
+                "key": key,
+                "key_hex": format!("0x{key:02x}"),
+                "key_ascii": if key.is_ascii_graphic() { (key as char).to_string() } else { String::new() },
+                "score": score,
+                "text": text,
+                "hex": hex::encode(&decoded),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|a, b| {
+        b["score"]
+            .as_f64()
+            .unwrap_or_default()
+            .total_cmp(&a["score"].as_f64().unwrap_or_default())
+    });
+    candidates.truncate(16);
+    json_output(
+        "xor-bruteforce",
+        serde_json::json!({
+            "candidates": candidates,
+        }),
+    )
+}
+
 fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let input = request.input_text()?;
     let mut candidates = Vec::new();
@@ -254,6 +318,144 @@ fn single_output(kind: &str, label: &str, value: String) -> OperationResponse {
         }],
         warnings: vec![],
     }
+}
+
+fn json_output(label: &str, value: serde_json::Value) -> Result<OperationResponse> {
+    Ok(single_output(
+        "json",
+        label,
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| CtfError::InvalidInput(error.to_string()))?,
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RadixRequest {
+    from: u32,
+    to: u32,
+    value: String,
+}
+
+fn parse_radix_request(text: &str) -> Result<RadixRequest> {
+    let mut from = None;
+    let mut to = None;
+    let mut value = None;
+    let mut positional = Vec::new();
+
+    for token in text
+        .split(|ch: char| ch.is_ascii_whitespace() || ch == ',' || ch == ';')
+        .filter(|token| !token.is_empty())
+    {
+        if let Some((key, item)) = token.split_once('=') {
+            match key.trim().to_ascii_lowercase().as_str() {
+                "from" | "src" | "in" => from = Some(parse_base(item)?),
+                "to" | "dst" | "out" => to = Some(parse_base(item)?),
+                "value" | "n" | "num" => value = Some(normalize_radix_digits(item)),
+                _ => positional.push(token.to_string()),
+            }
+        } else {
+            positional.push(token.to_string());
+        }
+    }
+
+    if from.is_none() && positional.len() >= 3 {
+        from = Some(parse_base(&positional[0])?);
+        to = Some(parse_base(&positional[1])?);
+        value = Some(normalize_radix_digits(&positional[2..].join("")));
+    }
+
+    let from = from.unwrap_or(10);
+    let to = to.unwrap_or(16);
+    validate_base(from)?;
+    validate_base(to)?;
+    let value = value
+        .or_else(|| positional.first().map(|item| normalize_radix_digits(item)))
+        .ok_or_else(|| {
+            CtfError::InvalidInput(
+                "provide value with `from=16 to=10 value=ff` or `16 10 ff`".to_string(),
+            )
+        })?;
+
+    Ok(RadixRequest { from, to, value })
+}
+
+fn parse_base(value: &str) -> Result<u32> {
+    value
+        .trim()
+        .parse::<u32>()
+        .map_err(|error| CtfError::InvalidInput(format!("invalid base: {error}")))
+}
+
+fn validate_base(base: u32) -> Result<()> {
+    if !(2..=36).contains(&base) {
+        return Err(CtfError::InvalidInput(format!(
+            "base must be between 2 and 36, got {base}"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_radix_digits(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X")
+        .replace('_', "")
+}
+
+fn format_radix(mut value: u128, base: u32) -> String {
+    debug_assert!((2..=36).contains(&base));
+    if value == 0 {
+        return "0".to_string();
+    }
+    let mut digits = Vec::new();
+    while value > 0 {
+        let digit = (value % base as u128) as u8;
+        let ch = match digit {
+            0..=9 => (b'0' + digit) as char,
+            _ => (b'a' + digit - 10) as char,
+        };
+        digits.push(ch);
+        value /= base as u128;
+    }
+    digits.iter().rev().collect()
+}
+
+fn parse_hex_or_raw(text: &str) -> Vec<u8> {
+    let cleaned = text
+        .trim()
+        .trim_start_matches("0x")
+        .replace([' ', '\n', '\r', '\t', ':', '-'], "");
+    if cleaned.len() >= 2
+        && cleaned.len().is_multiple_of(2)
+        && cleaned.chars().all(|ch| ch.is_ascii_hexdigit())
+        && let Ok(bytes) = hex::decode(cleaned)
+    {
+        return bytes;
+    }
+    text.as_bytes().to_vec()
+}
+
+fn bytes_to_lossy_text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn score_xor_plaintext(bytes: &[u8], text: &str) -> f64 {
+    let printable = bytes
+        .iter()
+        .filter(|byte| byte.is_ascii_graphic() || byte.is_ascii_whitespace())
+        .count() as f64
+        / bytes.len().max(1) as f64;
+    let mut score = printable;
+    let lower = text.to_ascii_lowercase();
+    for marker in [
+        "flag{", "ctf{", "http", "password", "admin", " the ", " and ",
+    ] {
+        if lower.contains(marker) {
+            score += 0.5;
+        }
+    }
+    score
 }
 
 struct AutoCandidate {
@@ -363,6 +565,33 @@ mod tests {
             .expect("auto decode");
         assert!(response.outputs[0].value.contains("flag{test}"));
         assert!(response.outputs[0].value.contains("base64.decode"));
+    }
+
+    #[test]
+    fn radix_convert_changes_base() {
+        let response = radix_convert(
+            &dummy_spec(),
+            &request("radix.convert", "from=16 to=10 value=ff"),
+        )
+        .expect("radix");
+        assert!(response.outputs[0].value.contains("\"converted\": \"255\""));
+    }
+
+    #[test]
+    fn xor_bruteforce_finds_plaintext() {
+        let ciphertext = hex::encode(
+            b"flag{xor}"
+                .iter()
+                .map(|byte| byte ^ 0x42)
+                .collect::<Vec<_>>(),
+        );
+        let response = xor_single_byte_bruteforce(
+            &dummy_spec(),
+            &request("xor.single_byte_bruteforce", &ciphertext),
+        )
+        .expect("xor");
+        assert!(response.outputs[0].value.contains("flag{xor}"));
+        assert!(response.outputs[0].value.contains("0x42"));
     }
 
     fn dummy_spec() -> OperationSpec {

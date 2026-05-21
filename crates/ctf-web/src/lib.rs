@@ -7,6 +7,7 @@ use ctf_core::{
 };
 use regex::Regex;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("http.raw.parse", http_raw_parse);
@@ -15,6 +16,9 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("http.raw.to_curl", http_raw_to_curl);
     runner.register_handler("http.raw.to_fetch", http_raw_to_fetch);
     runner.register_handler("jwt.decode", jwt_decode);
+    runner.register_handler("jwt.hs256.sign", jwt_hs256_sign);
+    runner.register_handler("jwt.hs256.verify", jwt_hs256_verify);
+    runner.register_handler("jwt.hs256.weak_key", jwt_hs256_weak_key);
     runner.register_handler("assets.classify", assets_classify);
 }
 
@@ -261,6 +265,95 @@ fn jwt_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
     })
 }
 
+fn jwt_hs256_sign(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let signing = parse_jwt_sign_input(&request.input_text()?)?;
+    let header = signing.header.unwrap_or_else(|| {
+        serde_json::json!({
+            "alg": "HS256",
+            "typ": "JWT",
+        })
+    });
+    if !header
+        .get("alg")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|alg| alg.eq_ignore_ascii_case("HS256"))
+    {
+        return Err(CtfError::InvalidInput(
+            "jwt.hs256.sign requires header alg HS256".to_string(),
+        ));
+    }
+    let token = sign_hs256(&header, &signing.payload, signing.secret.as_bytes())?;
+    Ok(single_output("text", "jwt-hs256", token))
+}
+
+fn jwt_hs256_verify(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let (token, secret) = parse_token_secret_input(&request.input_text()?)?;
+    let decoded = parse_jwt_token(&token)?;
+    let valid = verify_hs256_signature(&token, secret.as_bytes())?;
+    let mut warnings = Vec::new();
+    if !decoded
+        .header
+        .get("alg")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|alg| alg.eq_ignore_ascii_case("HS256"))
+    {
+        warnings.push("JWT alg is not HS256".to_string());
+    }
+    Ok(OperationResponse {
+        status: "ok".to_string(),
+        outputs: vec![OperationOutput {
+            kind: "json".to_string(),
+            label: "jwt-hs256-verify".to_string(),
+            value: serde_json::to_string_pretty(&serde_json::json!({
+                "valid": valid,
+                "header": decoded.header,
+                "payload": decoded.payload,
+            }))
+            .map_err(|error| CtfError::InvalidInput(error.to_string()))?,
+        }],
+        warnings,
+    })
+}
+
+fn jwt_hs256_weak_key(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let (token, candidates) = parse_token_dictionary_input(&request.input_text()?);
+    let decoded = parse_jwt_token(&token)?;
+    let mut warnings = Vec::new();
+    if !decoded
+        .header
+        .get("alg")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|alg| alg.eq_ignore_ascii_case("HS256"))
+    {
+        warnings.push("JWT alg is not HS256".to_string());
+    }
+
+    let found = candidates
+        .iter()
+        .find(|secret| verify_hs256_signature(&token, secret.as_bytes()).unwrap_or(false))
+        .cloned();
+    Ok(OperationResponse {
+        status: "ok".to_string(),
+        outputs: vec![OperationOutput {
+            kind: "json".to_string(),
+            label: "jwt-hs256-weak-key".to_string(),
+            value: serde_json::to_string_pretty(&serde_json::json!({
+                "found": found.is_some(),
+                "secret": found,
+                "tested": candidates.len(),
+            }))
+            .map_err(|error| CtfError::InvalidInput(error.to_string()))?,
+        }],
+        warnings,
+    })
+}
+
 fn assets_classify(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let text = request.input_text()?;
     let urls = captures(&text, r#"https?://[^\s"'<>]+"#)?;
@@ -318,6 +411,174 @@ fn decode_jwt_part(part: &str) -> Result<serde_json::Value> {
         .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(part))
         .map_err(|error| CtfError::InvalidInput(format!("invalid jwt base64: {error}")))?;
     serde_json::from_slice(&bytes).map_err(|error| CtfError::InvalidInput(error.to_string()))
+}
+
+#[derive(Debug, Clone)]
+struct ParsedJwt {
+    header: serde_json::Value,
+    payload: serde_json::Value,
+    signing_input: String,
+    signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct JwtSignInput {
+    secret: String,
+    header: Option<serde_json::Value>,
+    payload: serde_json::Value,
+}
+
+fn parse_jwt_token(token: &str) -> Result<ParsedJwt> {
+    let token = token.trim();
+    let parts = token.split('.').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return Err(CtfError::InvalidInput(
+            "JWT must contain header.payload.signature".to_string(),
+        ));
+    }
+    let header = decode_jwt_part(parts[0])?;
+    let payload = decode_jwt_part(parts[1])?;
+    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(parts[2])
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(parts[2]))
+        .map_err(|error| CtfError::InvalidInput(format!("invalid jwt signature: {error}")))?;
+    Ok(ParsedJwt {
+        header,
+        payload,
+        signing_input: format!("{}.{}", parts[0], parts[1]),
+        signature,
+    })
+}
+
+fn parse_jwt_sign_input(text: &str) -> Result<JwtSignInput> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|error| CtfError::InvalidInput(error.to_string()))?;
+    let secret = value
+        .get("secret")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| CtfError::InvalidInput("missing JSON field `secret`".to_string()))?
+        .to_string();
+    let payload = value
+        .get("payload")
+        .cloned()
+        .ok_or_else(|| CtfError::InvalidInput("missing JSON field `payload`".to_string()))?;
+    let header = value.get("header").cloned();
+    Ok(JwtSignInput {
+        secret,
+        header,
+        payload,
+    })
+}
+
+fn parse_token_secret_input(text: &str) -> Result<(String, String)> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let token = value
+            .get("token")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| CtfError::InvalidInput("missing JSON field `token`".to_string()))?
+            .to_string();
+        let secret = value
+            .get("secret")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| CtfError::InvalidInput("missing JSON field `secret`".to_string()))?
+            .to_string();
+        return Ok((token, secret));
+    }
+
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let token = lines
+        .next()
+        .ok_or_else(|| CtfError::InvalidInput("missing JWT token".to_string()))?
+        .trim_start_matches("token=")
+        .to_string();
+    let secret = lines
+        .next()
+        .ok_or_else(|| CtfError::InvalidInput("missing HS256 secret".to_string()))?
+        .trim_start_matches("secret=")
+        .to_string();
+    Ok((token, secret))
+}
+
+fn parse_token_dictionary_input(text: &str) -> (String, Vec<String>) {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let token = lines
+        .next()
+        .unwrap_or_default()
+        .trim_start_matches("token=")
+        .to_string();
+    let mut candidates = lines
+        .map(|line| line.trim_start_matches("secret=").to_string())
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        candidates = [
+            "secret", "password", "123456", "admin", "jwt", "key", "test", "flag", "ctf",
+            "changeme",
+        ]
+        .iter()
+        .map(|item| item.to_string())
+        .collect();
+    }
+    (token, candidates)
+}
+
+fn sign_hs256(
+    header: &serde_json::Value,
+    payload: &serde_json::Value,
+    secret: &[u8],
+) -> Result<String> {
+    let header_json =
+        serde_json::to_vec(header).map_err(|error| CtfError::InvalidInput(error.to_string()))?;
+    let payload_json =
+        serde_json::to_vec(payload).map_err(|error| CtfError::InvalidInput(error.to_string()))?;
+    let header_part = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_json);
+    let payload_part = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json);
+    let signing_input = format!("{header_part}.{payload_part}");
+    let signature = hmac_sha256(secret, signing_input.as_bytes());
+    let signature_part = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature);
+    Ok(format!("{signing_input}.{signature_part}"))
+}
+
+fn verify_hs256_signature(token: &str, secret: &[u8]) -> Result<bool> {
+    let parsed = parse_jwt_token(token)?;
+    let expected = hmac_sha256(secret, parsed.signing_input.as_bytes());
+    Ok(constant_time_eq(&expected, &parsed.signature))
+}
+
+fn hmac_sha256(secret: &[u8], message: &[u8]) -> Vec<u8> {
+    const BLOCK_SIZE: usize = 64;
+    let mut key = if secret.len() > BLOCK_SIZE {
+        Sha256::digest(secret).to_vec()
+    } else {
+        secret.to_vec()
+    };
+    key.resize(BLOCK_SIZE, 0);
+
+    let mut ipad = [0x36u8; BLOCK_SIZE];
+    let mut opad = [0x5cu8; BLOCK_SIZE];
+    for (index, key_byte) in key.iter().enumerate() {
+        ipad[index] ^= key_byte;
+        opad[index] ^= key_byte;
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(message);
+    let inner_digest = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner_digest);
+    outer.finalize().to_vec()
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0u8, |acc, (left, right)| acc | (left ^ right))
+        == 0
 }
 
 fn captures(text: &str, pattern: &str) -> Result<Vec<String>> {
@@ -464,6 +725,28 @@ mod tests {
         assert!(value.contains("a.example.com"));
         assert!(value.contains("192.168.1.0/24"));
         assert!(value.contains("admin@example.com"));
+    }
+
+    #[test]
+    fn jwt_hs256_sign_verify_and_weak_key() {
+        let sign_input = r#"{"secret":"secret","payload":{"sub":"123"}}"#;
+        let token = jwt_hs256_sign(&dummy_spec(), &request("jwt.hs256.sign", sign_input))
+            .expect("sign")
+            .outputs[0]
+            .value
+            .clone();
+
+        let verify_input = format!("{token}\nsecret");
+        let verified = jwt_hs256_verify(&dummy_spec(), &request("jwt.hs256.verify", &verify_input))
+            .expect("verify");
+        assert!(verified.outputs[0].value.contains("\"valid\": true"));
+
+        let weak = jwt_hs256_weak_key(
+            &dummy_spec(),
+            &request("jwt.hs256.weak_key", &format!("{token}\nadmin\nsecret")),
+        )
+        .expect("weak key");
+        assert!(weak.outputs[0].value.contains("\"secret\": \"secret\""));
     }
 
     fn dummy_spec() -> OperationSpec {

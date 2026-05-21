@@ -312,6 +312,20 @@ batchable = true
 priority = "P1"
 
 [[operations]]
+id = "radix.convert"
+name_zh = "进制转换"
+name_en = "Radix Convert"
+category = "codecs.number"
+aliases = ["base convert", "进制", "binary decimal hex"]
+input = ["text"]
+output = ["json", "text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
 id = "auto.decode"
 name_zh = "一键解码"
 name_en = "Auto Decode"
@@ -432,6 +446,60 @@ priority = "P1"
 [operations.secrets]
 redact_by_default = true
 fields = ["jwt", "token", "signature"]
+
+[[operations]]
+id = "jwt.hs256.sign"
+name_zh = "JWT HS256 签名"
+name_en = "JWT HS256 Sign"
+category = "web.token"
+aliases = ["jwt sign", "hs256 sign", "jwt签名"]
+input = ["text"]
+output = ["text"]
+backend = "rust"
+safety = "sensitive"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["secret", "jwt", "token", "signature"]
+
+[[operations]]
+id = "jwt.hs256.verify"
+name_zh = "JWT HS256 验签"
+name_en = "JWT HS256 Verify"
+category = "web.token"
+aliases = ["jwt verify", "hs256 verify", "jwt验签"]
+input = ["text"]
+output = ["json"]
+backend = "rust"
+safety = "sensitive"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["secret", "jwt", "token", "signature"]
+
+[[operations]]
+id = "jwt.hs256.weak_key"
+name_zh = "JWT HS256 弱密钥测试"
+name_en = "JWT HS256 Weak Key Test"
+category = "web.token"
+aliases = ["jwt crack", "jwt weak secret", "jwt弱密钥"]
+input = ["text"]
+output = ["json"]
+backend = "rust"
+safety = "local_only"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["secret", "jwt", "token", "signature"]
 
 [[operations]]
 id = "assets.classify"
