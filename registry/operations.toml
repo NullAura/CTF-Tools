@@ -326,6 +326,76 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "rot13.decode"
+name_zh = "ROT13"
+name_en = "ROT13"
+category = "crypto.classical"
+aliases = ["rot13", "凯撒13"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "caesar.bruteforce"
+name_zh = "Caesar 爆破"
+name_en = "Caesar Bruteforce"
+category = "crypto.classical"
+aliases = ["caesar", "凯撒", "shift cipher"]
+input = ["text", "file"]
+output = ["json", "ranked_text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "morse.encode"
+name_zh = "Morse 编码"
+name_en = "Morse Encode"
+category = "codecs.text"
+aliases = ["morse", "摩斯编码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "morse.decode"
+name_zh = "Morse 解码"
+name_en = "Morse Decode"
+category = "codecs.text"
+aliases = ["morse", "摩斯解码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "brainfuck.run"
+name_zh = "Brainfuck 运行"
+name_en = "Brainfuck Run"
+category = "program.esolang"
+aliases = ["brainfuck", "bf"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
 id = "auto.decode"
 name_zh = "一键解码"
 name_en = "Auto Decode"

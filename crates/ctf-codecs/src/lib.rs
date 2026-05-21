@@ -24,6 +24,11 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("hex.encode", hex_encode);
     runner.register_handler("radix.convert", radix_convert);
     runner.register_handler("xor.single_byte_bruteforce", xor_single_byte_bruteforce);
+    runner.register_handler("rot13.decode", rot13_decode);
+    runner.register_handler("caesar.bruteforce", caesar_bruteforce);
+    runner.register_handler("morse.encode", morse_encode);
+    runner.register_handler("morse.decode", morse_decode);
+    runner.register_handler("brainfuck.run", brainfuck_run);
     runner.register_handler("auto.decode", auto_decode);
 }
 
@@ -247,6 +252,86 @@ fn xor_single_byte_bruteforce(
     )
 }
 
+fn rot13_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "rot13",
+        request.input_text()?.chars().map(rot13_char).collect(),
+    ))
+}
+
+fn caesar_bruteforce(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let input = request.input_text()?;
+    let candidates = (0u8..26)
+        .map(|shift| {
+            let text = input
+                .chars()
+                .map(|ch| caesar_shift_char(ch, 26 - shift))
+                .collect::<String>();
+            serde_json::json!({
+                "shift": shift,
+                "score": score_text(&text),
+                "text": text,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut candidates = candidates;
+    candidates.sort_by(|a, b| {
+        b["score"]
+            .as_f64()
+            .unwrap_or_default()
+            .total_cmp(&a["score"].as_f64().unwrap_or_default())
+    });
+    json_output(
+        "caesar",
+        serde_json::json!({
+            "candidates": candidates,
+        }),
+    )
+}
+
+fn morse_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let mut words = Vec::new();
+    for word in request.input_text()?.split_whitespace() {
+        let letters = word
+            .chars()
+            .map(|ch| {
+                morse_for_char(ch).ok_or_else(|| {
+                    CtfError::InvalidInput(format!("unsupported morse character: {ch}"))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        words.push(letters.join(" "));
+    }
+    Ok(single_output("text", "morse", words.join(" / ")))
+}
+
+fn morse_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let input = request.input_text()?;
+    let mut output = String::new();
+    for token in input.split_whitespace() {
+        if token == "/" || token == "|" {
+            output.push(' ');
+        } else if let Some(ch) = char_for_morse(token) {
+            output.push(ch);
+        } else {
+            return Err(CtfError::InvalidInput(format!(
+                "unsupported morse token: {token}"
+            )));
+        }
+    }
+    Ok(single_output("text", "morse", output))
+}
+
+fn brainfuck_run(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let program = request.input_text()?;
+    let output = run_brainfuck(&program, request.limits.timeout_ms)?;
+    Ok(single_output("text", "brainfuck", output))
+}
+
 fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let input = request.input_text()?;
     let mut candidates = Vec::new();
@@ -440,6 +525,182 @@ fn bytes_to_lossy_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+fn rot13_char(ch: char) -> char {
+    match ch {
+        'a'..='z' => (((ch as u8 - b'a' + 13) % 26) + b'a') as char,
+        'A'..='Z' => (((ch as u8 - b'A' + 13) % 26) + b'A') as char,
+        _ => ch,
+    }
+}
+
+fn caesar_shift_char(ch: char, shift: u8) -> char {
+    match ch {
+        'a'..='z' => (((ch as u8 - b'a' + shift) % 26) + b'a') as char,
+        'A'..='Z' => (((ch as u8 - b'A' + shift) % 26) + b'A') as char,
+        _ => ch,
+    }
+}
+
+fn morse_for_char(ch: char) -> Option<&'static str> {
+    Some(match ch.to_ascii_uppercase() {
+        'A' => ".-",
+        'B' => "-...",
+        'C' => "-.-.",
+        'D' => "-..",
+        'E' => ".",
+        'F' => "..-.",
+        'G' => "--.",
+        'H' => "....",
+        'I' => "..",
+        'J' => ".---",
+        'K' => "-.-",
+        'L' => ".-..",
+        'M' => "--",
+        'N' => "-.",
+        'O' => "---",
+        'P' => ".--.",
+        'Q' => "--.-",
+        'R' => ".-.",
+        'S' => "...",
+        'T' => "-",
+        'U' => "..-",
+        'V' => "...-",
+        'W' => ".--",
+        'X' => "-..-",
+        'Y' => "-.--",
+        'Z' => "--..",
+        '0' => "-----",
+        '1' => ".----",
+        '2' => "..---",
+        '3' => "...--",
+        '4' => "....-",
+        '5' => ".....",
+        '6' => "-....",
+        '7' => "--...",
+        '8' => "---..",
+        '9' => "----.",
+        _ => return None,
+    })
+}
+
+fn char_for_morse(token: &str) -> Option<char> {
+    let table = [
+        (".-", 'A'),
+        ("-...", 'B'),
+        ("-.-.", 'C'),
+        ("-..", 'D'),
+        (".", 'E'),
+        ("..-.", 'F'),
+        ("--.", 'G'),
+        ("....", 'H'),
+        ("..", 'I'),
+        (".---", 'J'),
+        ("-.-", 'K'),
+        (".-..", 'L'),
+        ("--", 'M'),
+        ("-.", 'N'),
+        ("---", 'O'),
+        (".--.", 'P'),
+        ("--.-", 'Q'),
+        (".-.", 'R'),
+        ("...", 'S'),
+        ("-", 'T'),
+        ("..-", 'U'),
+        ("...-", 'V'),
+        (".--", 'W'),
+        ("-..-", 'X'),
+        ("-.--", 'Y'),
+        ("--..", 'Z'),
+        ("-----", '0'),
+        (".----", '1'),
+        ("..---", '2'),
+        ("...--", '3'),
+        ("....-", '4'),
+        (".....", '5'),
+        ("-....", '6'),
+        ("--...", '7'),
+        ("---..", '8'),
+        ("----.", '9'),
+    ];
+    table
+        .iter()
+        .find(|(morse, _)| *morse == token)
+        .map(|(_, ch)| *ch)
+}
+
+fn run_brainfuck(program: &str, timeout_ms: u64) -> Result<String> {
+    let instructions = program
+        .chars()
+        .filter(|ch| matches!(ch, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']'))
+        .collect::<Vec<_>>();
+    let jumps = brainfuck_jump_table(&instructions)?;
+    let mut tape = vec![0u8; 30_000];
+    let mut data_ptr = 0usize;
+    let mut inst_ptr = 0usize;
+    let mut steps = 0u64;
+    let max_steps = timeout_ms.saturating_mul(1_000).max(100_000);
+    let mut output = Vec::new();
+
+    while inst_ptr < instructions.len() {
+        steps += 1;
+        if steps > max_steps {
+            return Err(CtfError::InvalidInput(format!(
+                "brainfuck step limit exceeded ({max_steps})"
+            )));
+        }
+
+        match instructions[inst_ptr] {
+            '>' => {
+                data_ptr += 1;
+                if data_ptr == tape.len() {
+                    tape.push(0);
+                }
+            }
+            '<' => {
+                data_ptr = data_ptr.checked_sub(1).ok_or_else(|| {
+                    CtfError::InvalidInput("brainfuck pointer moved before tape start".to_string())
+                })?;
+            }
+            '+' => tape[data_ptr] = tape[data_ptr].wrapping_add(1),
+            '-' => tape[data_ptr] = tape[data_ptr].wrapping_sub(1),
+            '.' => output.push(tape[data_ptr]),
+            ',' => tape[data_ptr] = 0,
+            '[' if tape[data_ptr] == 0 => inst_ptr = jumps[&inst_ptr],
+            ']' if tape[data_ptr] != 0 => inst_ptr = jumps[&inst_ptr],
+            _ => {}
+        }
+        inst_ptr += 1;
+    }
+
+    Ok(bytes_to_display(output))
+}
+
+fn brainfuck_jump_table(instructions: &[char]) -> Result<std::collections::HashMap<usize, usize>> {
+    let mut stack = Vec::new();
+    let mut jumps = std::collections::HashMap::new();
+    for (index, instruction) in instructions.iter().enumerate() {
+        match instruction {
+            '[' => stack.push(index),
+            ']' => {
+                let Some(open) = stack.pop() else {
+                    return Err(CtfError::InvalidInput(
+                        "unmatched brainfuck `]`".to_string(),
+                    ));
+                };
+                jumps.insert(open, index);
+                jumps.insert(index, open);
+            }
+            _ => {}
+        }
+    }
+    if !stack.is_empty() {
+        return Err(CtfError::InvalidInput(
+            "unmatched brainfuck `[`".to_string(),
+        ));
+    }
+    Ok(jumps)
+}
+
 fn score_xor_plaintext(bytes: &[u8], text: &str) -> f64 {
     let printable = bytes
         .iter()
@@ -592,6 +853,40 @@ mod tests {
         .expect("xor");
         assert!(response.outputs[0].value.contains("flag{xor}"));
         assert!(response.outputs[0].value.contains("0x42"));
+    }
+
+    #[test]
+    fn rot13_decodes_text() {
+        let response =
+            rot13_decode(&dummy_spec(), &request("rot13.decode", "synt{grfg}")).expect("rot13");
+        assert_eq!(response.outputs[0].value, "flag{test}");
+    }
+
+    #[test]
+    fn morse_round_trips() {
+        let encoded = morse_encode(&dummy_spec(), &request("morse.encode", "SOS 123"))
+            .expect("morse encode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(encoded, "... --- ... / .---- ..--- ...--");
+
+        let decoded = morse_decode(&dummy_spec(), &request("morse.decode", &encoded))
+            .expect("morse decode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(decoded, "SOS 123");
+    }
+
+    #[test]
+    fn brainfuck_outputs_text() {
+        let response = brainfuck_run(
+            &dummy_spec(),
+            &request("brainfuck.run", "+++++[>+++++++++++++<-]>."),
+        )
+        .expect("brainfuck");
+        assert_eq!(response.outputs[0].value, "A");
     }
 
     fn dummy_spec() -> OperationSpec {
