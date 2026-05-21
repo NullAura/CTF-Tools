@@ -907,6 +907,7 @@ dependencies = [
  "ctf-codecs",
  "ctf-core",
  "ctf-crypto",
+ "ctf-stego",
  "ctf-web",
  "serde",
  "serde_json",
@@ -918,6 +919,11 @@ dependencies = [
 [[package]]
 name = "ctf-stego"
 version = "0.1.0"
+dependencies = [
+ "ctf-core",
+ "regex",
+ "serde_json",
+]
 
 [[package]]
 name = "ctf-web"

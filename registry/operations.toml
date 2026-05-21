@@ -453,10 +453,38 @@ name_zh = "PCAP HTTP 提取"
 name_en = "Extract HTTP from PCAP"
 category = "forensics.pcap"
 aliases = ["pcap extract", "http objects"]
-input = ["file"]
-output = ["artifact_dir", "json"]
-backend = "python_worker"
+input = ["text", "file"]
+output = ["json"]
+backend = "rust"
 safety = "local_only"
 deterministic = true
 batchable = true
 priority = "P2"
+
+[[operations]]
+id = "file.hex_view"
+name_zh = "Hex Viewer"
+name_en = "Hex Viewer"
+category = "file.inspect"
+aliases = ["hex viewer", "文件十六进制", "文件hex"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "file.entropy"
+name_zh = "文件熵分析"
+name_en = "File Entropy"
+category = "file.inspect"
+aliases = ["entropy", "熵值"]
+input = ["text", "bytes", "file"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
