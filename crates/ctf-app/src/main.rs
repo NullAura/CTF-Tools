@@ -3,6 +3,11 @@ use eframe::egui;
 
 mod launcher_ui;
 
+const DEFAULT_OPERATION_CATEGORY_HEIGHT: f32 = 220.0;
+const MIN_OPERATION_CATEGORY_HEIGHT: f32 = 96.0;
+const MIN_OPERATION_TOOL_LIBRARY_HEIGHT: f32 = 180.0;
+const OPERATIONS_LIBRARY_SPLITTER_HEIGHT: f32 = 18.0;
+
 #[derive(Debug, Clone)]
 struct OperationDragPayload {
     operation_id: String,
@@ -594,6 +599,59 @@ fn panel_toggle(ui: &mut egui::Ui, visible: &mut bool, label: &str) {
     }
 }
 
+fn split_category_height_bounds(available_height: f32) -> (f32, f32) {
+    let usable_height = (available_height - OPERATIONS_LIBRARY_SPLITTER_HEIGHT).max(0.0);
+    if usable_height <= 0.0 {
+        return (0.0, 0.0);
+    }
+
+    let min_category_height = MIN_OPERATION_CATEGORY_HEIGHT.min(usable_height);
+    let min_tool_library_height =
+        MIN_OPERATION_TOOL_LIBRARY_HEIGHT.min((usable_height - min_category_height).max(0.0));
+    let max_category_height = (usable_height - min_tool_library_height).max(min_category_height);
+    (min_category_height, max_category_height)
+}
+
+fn operations_library_splitter(
+    ui: &mut egui::Ui,
+    theme: AppTheme,
+    language: Language,
+) -> egui::Response {
+    let tokens = ui_tokens(theme);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), OPERATIONS_LIBRARY_SPLITTER_HEIGHT),
+        egui::Sense::drag(),
+    );
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::ResizeVertical)
+        .on_hover_text(text(
+            language,
+            "Drag to resize Categories and All Tools",
+            "拖动调整分类和工具列表高度",
+        ));
+    let active = response.hovered() || response.dragged();
+    ui.painter().rect_filled(
+        rect.shrink2(egui::vec2(4.0, 3.0)),
+        egui::CornerRadius::same(5),
+        if active {
+            tokens.accent_soft
+        } else {
+            tokens.panel_alt
+        },
+    );
+    let line_color = if active { tokens.accent } else { tokens.border };
+    let stroke = egui::Stroke::new(if active { 2.0 } else { 1.0 }, line_color);
+    let center_y = rect.center().y;
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left() + 12.0, center_y),
+            egui::pos2(rect.right() - 12.0, center_y),
+        ],
+        stroke,
+    );
+    response
+}
+
 fn text(language: Language, english: &'static str, chinese: &'static str) -> &'static str {
     match language {
         Language::English => english,
@@ -669,6 +727,7 @@ struct CtfToolsApp {
     show_recipe: bool,
     show_details: bool,
     show_launcher_editor: bool,
+    operations_category_height: f32,
 }
 
 impl CtfToolsApp {
@@ -708,6 +767,7 @@ impl CtfToolsApp {
             show_recipe: true,
             show_details: true,
             show_launcher_editor: true,
+            operations_category_height: DEFAULT_OPERATION_CATEGORY_HEIGHT,
         }
     }
 
@@ -1105,15 +1165,13 @@ impl CtfToolsApp {
                 .width_range(280.0..=520.0)
                 .show(ctx, |ui| {
                     panel_frame(self.theme).show(ui, |ui| {
-                        if self.show_categories {
-                            self.render_category_nav(ui, &categories, &category_counts);
-                        }
-                        if self.show_categories && self.show_tool_library {
-                            ui.separator();
-                        }
-                        if self.show_tool_library {
-                            self.render_tool_library(ui, active_group, &visible_operations);
-                        }
+                        self.render_operations_library(
+                            ui,
+                            &categories,
+                            &category_counts,
+                            active_group,
+                            &visible_operations,
+                        );
                     });
                 });
         }
@@ -1160,6 +1218,60 @@ impl CtfToolsApp {
         });
     }
 
+    fn render_operations_library(
+        &mut self,
+        ui: &mut egui::Ui,
+        categories: &[CategoryGroup],
+        category_counts: &[usize],
+        active_group: &CategoryGroup,
+        visible_operations: &[OperationListItem],
+    ) {
+        if self.show_categories && self.show_tool_library {
+            let available_height = ui.available_height();
+            let (min_category_height, max_category_height) =
+                split_category_height_bounds(available_height);
+            self.operations_category_height = self
+                .operations_category_height
+                .clamp(min_category_height, max_category_height);
+
+            let (category_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), self.operations_category_height),
+                egui::Sense::hover(),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(category_rect), |ui| {
+                ui.set_min_size(category_rect.size());
+                ui.set_max_size(category_rect.size());
+                ui.set_clip_rect(category_rect);
+                self.render_category_nav(ui, categories, category_counts);
+            });
+
+            let splitter = operations_library_splitter(ui, self.theme, self.language);
+            if splitter.dragged() {
+                self.operations_category_height = (self.operations_category_height
+                    + splitter.drag_delta().y)
+                    .clamp(min_category_height, max_category_height);
+            }
+
+            let (tools_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), ui.available_height().max(0.0)),
+                egui::Sense::hover(),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(tools_rect), |ui| {
+                ui.set_min_size(tools_rect.size());
+                ui.set_max_size(tools_rect.size());
+                ui.set_clip_rect(tools_rect);
+                self.render_tool_library(ui, active_group, visible_operations);
+            });
+        } else {
+            if self.show_categories {
+                self.render_category_nav(ui, categories, category_counts);
+            }
+            if self.show_tool_library {
+                self.render_tool_library(ui, active_group, visible_operations);
+            }
+        }
+    }
+
     fn render_category_nav(
         &mut self,
         ui: &mut egui::Ui,
@@ -1176,7 +1288,7 @@ impl CtfToolsApp {
 
         egui::ScrollArea::vertical()
             .id_salt("operations_category_scroll")
-            .max_height(190.0)
+            .max_height(ui.available_height())
             .show(ui, |ui| {
                 for (group, count) in categories.iter().zip(category_counts.iter()) {
                     let selected = self.active_category == group.id;
@@ -1272,6 +1384,7 @@ impl CtfToolsApp {
         let mut operation_to_add = None;
         egui::ScrollArea::vertical()
             .id_salt("operations_tool_library_scroll")
+            .max_height(ui.available_height())
             .show(ui, |ui| {
                 for op in visible_operations {
                     if previous_category != op.category {
