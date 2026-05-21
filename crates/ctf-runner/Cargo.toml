@@ -9,3 +9,8 @@ ctf-codecs = { path = "../ctf-codecs" }
 ctf-core = { path = "../ctf-core" }
 ctf-crypto = { path = "../ctf-crypto" }
 ctf-web = { path = "../ctf-web" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+wait-timeout = "0.2"
