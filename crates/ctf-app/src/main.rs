@@ -48,7 +48,9 @@ struct CtfToolsApp {
     registry: Option<OperationRegistry>,
     query: String,
     selected_operation: Option<String>,
+    input_kind: String,
     input: String,
+    file_path: String,
     output: String,
     warnings: Vec<String>,
     last_status: String,
@@ -66,7 +68,9 @@ impl CtfToolsApp {
             registry,
             query: String::new(),
             selected_operation,
+            input_kind: "text".to_string(),
             input: "ZmxhZ3t0ZXN0fQ==".to_string(),
+            file_path: String::new(),
             output: String::new(),
             warnings: Vec::new(),
             last_status: "Ready".to_string(),
@@ -84,11 +88,16 @@ impl CtfToolsApp {
 
         let runner = ctf_runner::default_runner()
             .unwrap_or_else(|_| ctf_core::OperationRunner::new(registry));
+        let input_value = if self.input_kind == "file" {
+            self.file_path.clone()
+        } else {
+            self.input.clone()
+        };
         let result = runner.run(OperationRequest {
             operation,
             input: OperationInput {
-                kind: "text".to_string(),
-                value: self.input.clone(),
+                kind: self.input_kind.clone(),
+                value: input_value,
             },
             limits: TaskLimits::default(),
         });
@@ -170,6 +179,13 @@ impl eframe::App for CtfToolsApp {
                                 .clicked()
                             {
                                 self.selected_operation = Some(op.id.clone());
+                                if !op.input.iter().any(|kind| kind == &self.input_kind) {
+                                    self.input_kind = op
+                                        .input
+                                        .first()
+                                        .cloned()
+                                        .unwrap_or_else(|| "text".to_string());
+                                }
                             }
                         }
                     });
@@ -187,18 +203,38 @@ impl eframe::App for CtfToolsApp {
                     ui.label(format!("output: {}", spec.output.join("/")));
                 }
             });
-            ui.add(
-                egui::TextEdit::multiline(&mut self.input)
-                    .desired_rows(10)
-                    .desired_width(f32::INFINITY),
-            );
+            if let Some(spec) = &selected_spec {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("输入类型");
+                    for kind in &spec.input {
+                        ui.selectable_value(&mut self.input_kind, kind.clone(), kind);
+                    }
+                });
+            }
+            if self.input_kind == "file" {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.file_path)
+                        .hint_text("/path/to/file")
+                        .desired_width(f32::INFINITY),
+                );
+            } else {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.input)
+                        .desired_rows(10)
+                        .desired_width(f32::INFINITY),
+                );
+            }
 
             ui.horizontal(|ui| {
                 if ui.button("执行").clicked() {
                     self.run_selected();
                 }
                 if ui.button("清空输入").clicked() {
-                    self.input.clear();
+                    if self.input_kind == "file" {
+                        self.file_path.clear();
+                    } else {
+                        self.input.clear();
+                    }
                 }
                 if ui.button("复制结果").clicked() && !self.output.is_empty() {
                     ctx.copy_text(self.output.clone());
