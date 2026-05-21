@@ -806,6 +806,7 @@ name = "ctf-app"
 version = "0.1.0"
 dependencies = [
  "ctf-core",
+ "ctf-runner",
  "eframe",
  "egui",
 ]
@@ -817,6 +818,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ctf-core",
+ "ctf-runner",
  "serde_json",
 ]
 
@@ -841,6 +843,9 @@ version = "0.1.0"
 [[package]]
 name = "ctf-runner"
 version = "0.1.0"
+dependencies = [
+ "ctf-core",
+]
 
 [[package]]
 name = "ctf-stego"

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use ctf_core::{OperationInput, OperationRegistry, OperationRequest, OperationRunner, TaskLimits};
+use ctf_core::{OperationInput, OperationRegistry, OperationRequest, TaskLimits};
 
 #[derive(Debug, Parser)]
 #[command(name = "ctf-tools", version, about = "Rust + Python CTF toolbox")]
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
                 },
                 _ => anyhow::bail!("provide exactly one input: --text or --file"),
             };
-            let runner = OperationRunner::new(registry);
+            let runner = ctf_runner::default_runner().context("initialize operation runner")?;
             let response = runner.run(OperationRequest {
                 operation,
                 input,

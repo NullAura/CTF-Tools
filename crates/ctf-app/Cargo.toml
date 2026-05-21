@@ -10,6 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 ctf-core = { path = "../ctf-core" }
+ctf-runner = { path = "../ctf-runner" }
 eframe.workspace = true
 egui.workspace = true
-

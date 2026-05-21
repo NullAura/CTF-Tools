@@ -1,4 +1,4 @@
-use ctf_core::{OperationInput, OperationRegistry, OperationRequest, OperationRunner, TaskLimits};
+use ctf_core::{OperationInput, OperationRegistry, OperationRequest, TaskLimits};
 use eframe::egui;
 
 fn main() -> eframe::Result<()> {
@@ -127,7 +127,8 @@ impl eframe::App for CtfToolsApp {
                 && let (Some(registry), Some(operation)) =
                     (self.registry.clone(), self.selected_operation.clone())
             {
-                let runner = OperationRunner::new(registry);
+                let runner = ctf_runner::default_runner()
+                    .unwrap_or_else(|_| ctf_core::OperationRunner::new(registry));
                 let result = runner.run(OperationRequest {
                     operation,
                     input: OperationInput {

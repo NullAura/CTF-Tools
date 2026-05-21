@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -92,6 +93,12 @@ pub struct OperationResponse {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ErrorReport {
+    pub code: String,
+    pub message: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CtfError {
     #[error("failed to read registry at {path}: {source}")]
@@ -108,6 +115,10 @@ pub enum CtfError {
     OperationNotFound(String),
     #[error("operation is registered but not implemented yet: {0}")]
     UnsupportedOperation(String),
+    #[error("input kind `{kind}` is not accepted by operation `{operation}`")]
+    InvalidInputKind { operation: String, kind: String },
+    #[error("operation output exceeds max_output_bytes ({limit})")]
+    OutputLimitExceeded { limit: usize },
 }
 
 pub type Result<T> = std::result::Result<T, CtfError>;
@@ -171,15 +182,25 @@ impl OperationRegistry {
 
 pub struct OperationRunner {
     registry: OperationRegistry,
+    handlers: HashMap<String, OperationHandler>,
 }
+
+pub type OperationHandler = fn(&OperationSpec, &OperationRequest) -> Result<OperationResponse>;
 
 impl OperationRunner {
     pub fn new(registry: OperationRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            handlers: HashMap::new(),
+        }
     }
 
     pub fn registry(&self) -> &OperationRegistry {
         &self.registry
+    }
+
+    pub fn register_handler(&mut self, operation: impl Into<String>, handler: OperationHandler) {
+        self.handlers.insert(operation.into(), handler);
     }
 
     pub fn run(&self, request: OperationRequest) -> Result<OperationResponse> {
@@ -188,8 +209,62 @@ impl OperationRunner {
             .find(&request.operation)
             .ok_or_else(|| CtfError::OperationNotFound(request.operation.clone()))?;
 
-        Err(CtfError::UnsupportedOperation(spec.id.clone()))
+        if !spec.input.iter().any(|kind| kind == &request.input.kind) {
+            return Err(CtfError::InvalidInputKind {
+                operation: spec.id.clone(),
+                kind: request.input.kind,
+            });
+        }
+
+        let Some(handler) = self.handlers.get(&spec.id) else {
+            return Err(CtfError::UnsupportedOperation(spec.id.clone()));
+        };
+
+        let response = handler(spec, &request)?;
+        enforce_output_limit(&response, request.limits.max_output_bytes)?;
+        Ok(response)
     }
+}
+
+pub fn error_report(error: &CtfError) -> ErrorReport {
+    match error {
+        CtfError::RegistryRead { .. } => ErrorReport {
+            code: "registry_read".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::RegistryParse { .. } => ErrorReport {
+            code: "registry_parse".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::OperationNotFound(_) => ErrorReport {
+            code: "operation_not_found".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::UnsupportedOperation(_) => ErrorReport {
+            code: "unsupported_operation".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::InvalidInputKind { .. } => ErrorReport {
+            code: "invalid_input_kind".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::OutputLimitExceeded { .. } => ErrorReport {
+            code: "output_limit_exceeded".to_string(),
+            message: error.to_string(),
+        },
+    }
+}
+
+fn enforce_output_limit(response: &OperationResponse, limit: usize) -> Result<()> {
+    let total: usize = response
+        .outputs
+        .iter()
+        .map(|output| output.value.len())
+        .sum();
+    if total > limit {
+        return Err(CtfError::OutputLimitExceeded { limit });
+    }
+    Ok(())
 }
 
 fn default_registry_path() -> PathBuf {
@@ -228,5 +303,52 @@ mod tests {
                 .iter()
                 .any(|op| op.id == "http.raw.to_python_requests")
         );
+    }
+
+    #[test]
+    fn runner_executes_registered_handler() {
+        fn handler(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+            Ok(OperationResponse {
+                status: "ok".to_string(),
+                outputs: vec![OperationOutput {
+                    kind: "text".to_string(),
+                    label: "echo".to_string(),
+                    value: request.input.value.clone(),
+                }],
+                warnings: vec![],
+            })
+        }
+
+        let registry = OperationRegistry::load_default().expect("registry should load");
+        let mut runner = OperationRunner::new(registry);
+        runner.register_handler("base64.decode", handler);
+        let response = runner
+            .run(OperationRequest {
+                operation: "base64.decode".to_string(),
+                input: OperationInput {
+                    kind: "text".to_string(),
+                    value: "abc".to_string(),
+                },
+                limits: TaskLimits::default(),
+            })
+            .expect("handler should run");
+        assert_eq!(response.outputs[0].value, "abc");
+    }
+
+    #[test]
+    fn runner_rejects_invalid_input_kind() {
+        let registry = OperationRegistry::load_default().expect("registry should load");
+        let runner = OperationRunner::new(registry);
+        let error = runner
+            .run(OperationRequest {
+                operation: "base64.decode".to_string(),
+                input: OperationInput {
+                    kind: "json".to_string(),
+                    value: "{}".to_string(),
+                },
+                limits: TaskLimits::default(),
+            })
+            .expect_err("invalid kind should fail");
+        assert_eq!(error_report(&error).code, "invalid_input_kind");
     }
 }

@@ -5,4 +5,4 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-
+ctf-core = { path = "../ctf-core" }
