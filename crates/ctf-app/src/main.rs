@@ -1,5 +1,10 @@
-use ctf_core::{OperationInput, OperationRegistry, OperationRequest, TaskLimits};
+use ctf_core::{OperationInput, OperationRegistry, OperationRequest, OperationSpec, TaskLimits};
 use eframe::egui;
+
+#[derive(Debug, Clone)]
+struct OperationDragPayload {
+    operation_id: String,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct CategoryGroup {
@@ -17,6 +22,25 @@ struct OperationListItem {
     priority: String,
     safety: String,
     input: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct RecipeStep {
+    operation_id: String,
+    enabled: bool,
+    last_status: String,
+    output_preview: String,
+}
+
+impl RecipeStep {
+    fn new(operation_id: impl Into<String>) -> Self {
+        Self {
+            operation_id: operation_id.into(),
+            enabled: true,
+            last_status: "Ready".to_string(),
+            output_preview: String::new(),
+        }
+    }
 }
 
 fn main() -> eframe::Result<()> {
@@ -89,10 +113,12 @@ struct CtfToolsApp {
     query: String,
     active_category: String,
     selected_operation: Option<String>,
+    recipe: Vec<RecipeStep>,
     input_kind: String,
     input: String,
     file_path: String,
     output: String,
+    trace: Vec<String>,
     warnings: Vec<String>,
     last_status: String,
 }
@@ -104,16 +130,22 @@ impl CtfToolsApp {
             .as_ref()
             .and_then(|registry| registry.operations().first())
             .map(|op| op.id.clone());
+        let recipe = selected_operation
+            .iter()
+            .map(RecipeStep::new)
+            .collect::<Vec<_>>();
 
         Self {
             registry,
             query: String::new(),
             active_category: "all".to_string(),
             selected_operation,
+            recipe,
             input_kind: "text".to_string(),
             input: "ZmxhZ3t0ZXN0fQ==".to_string(),
             file_path: String::new(),
             output: String::new(),
+            trace: Vec::new(),
             warnings: Vec::new(),
             last_status: "Ready".to_string(),
         }
@@ -160,6 +192,142 @@ impl CtfToolsApp {
                 self.warnings.clear();
                 self.last_status = "Error".to_string();
             }
+        }
+    }
+
+    fn run_recipe(&mut self) {
+        if self.recipe.is_empty() {
+            self.run_selected();
+            return;
+        }
+
+        let Some(registry) = self.registry.clone() else {
+            self.output = "No operation registry loaded".to_string();
+            self.last_status = "Error".to_string();
+            return;
+        };
+
+        let runner = ctf_runner::default_runner()
+            .unwrap_or_else(|_| ctf_core::OperationRunner::new(registry.clone()));
+        let mut current_kind = self.input_kind.clone();
+        let mut current_value = if self.input_kind == "file" {
+            self.file_path.clone()
+        } else {
+            self.input.clone()
+        };
+        let mut trace = Vec::new();
+        let mut warnings = Vec::new();
+        let mut ran_any_step = false;
+
+        for step in &mut self.recipe {
+            step.last_status = if step.enabled {
+                "Pending".to_string()
+            } else {
+                "Skipped".to_string()
+            };
+            step.output_preview.clear();
+        }
+
+        for index in 0..self.recipe.len() {
+            if !self.recipe[index].enabled {
+                continue;
+            }
+
+            ran_any_step = true;
+            let operation_id = self.recipe[index].operation_id.clone();
+            let Some(spec) = registry.find(&operation_id).cloned() else {
+                self.recipe[index].last_status = "Error".to_string();
+                self.output = format!("operation not found: {operation_id}");
+                self.last_status = "Error".to_string();
+                self.trace = trace;
+                self.warnings = warnings;
+                return;
+            };
+            let Some(step_input_kind) = chain_input_kind(&spec, &current_kind) else {
+                self.recipe[index].last_status = "Error".to_string();
+                self.output = format!("{} 不接受上一步输出类型 `{}`", spec.name_zh, current_kind);
+                self.last_status = "Error".to_string();
+                self.trace = trace;
+                self.warnings = warnings;
+                return;
+            };
+
+            let result = runner.run(OperationRequest {
+                operation: operation_id.clone(),
+                input: OperationInput {
+                    kind: step_input_kind.clone(),
+                    value: current_value.clone(),
+                },
+                limits: TaskLimits::default(),
+            });
+
+            match result {
+                Ok(response) => {
+                    let joined = join_output_values(&response.outputs);
+                    current_value = joined.clone();
+                    current_kind = "text".to_string();
+                    self.recipe[index].last_status = "OK".to_string();
+                    self.recipe[index].output_preview = preview_text(&joined);
+                    warnings.extend(response.warnings);
+                    trace.push(format!(
+                        "{}. {} -> {} bytes",
+                        trace.len() + 1,
+                        spec.name_zh,
+                        joined.len()
+                    ));
+                }
+                Err(error) => {
+                    self.recipe[index].last_status = "Error".to_string();
+                    self.recipe[index].output_preview = error.to_string();
+                    self.output = error.to_string();
+                    self.last_status = "Error".to_string();
+                    self.trace = trace;
+                    self.warnings = warnings;
+                    return;
+                }
+            }
+        }
+
+        self.output = current_value;
+        self.trace = trace;
+        self.warnings = warnings;
+        self.last_status = if ran_any_step {
+            "OK"
+        } else {
+            "No enabled steps"
+        }
+        .to_string();
+    }
+
+    fn add_operation_to_recipe(&mut self, operation_id: &str) {
+        if self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.find(operation_id))
+            .is_none()
+        {
+            self.last_status = "Error".to_string();
+            self.output = format!("operation not found: {operation_id}");
+            return;
+        }
+
+        self.recipe.push(RecipeStep::new(operation_id));
+        self.last_status = "Recipe updated".to_string();
+    }
+
+    fn move_recipe_step(&mut self, index: usize, direction: isize) {
+        let target = if direction.is_negative() {
+            index.checked_sub(direction.unsigned_abs())
+        } else {
+            index.checked_add(direction as usize)
+        };
+
+        let Some(target) = target else {
+            return;
+        };
+        if target < self.recipe.len() {
+            self.recipe.swap(index, target);
+            self.last_status = "Recipe updated".to_string();
         }
     }
 
@@ -325,6 +493,7 @@ impl eframe::App for CtfToolsApp {
                     });
                     ui.separator();
                     let mut previous_category = String::new();
+                    let mut operation_to_add = None;
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         for op in &visible_operations {
                             if previous_category != op.category {
@@ -341,18 +510,33 @@ impl eframe::App for CtfToolsApp {
                                 "{}\n{} · {} · {}",
                                 op.name_zh, op.id, op.priority, op.safety
                             );
-                            if ui.selectable_label(selected, label).clicked() {
-                                self.selected_operation = Some(op.id.clone());
-                                if !op.input.iter().any(|kind| kind == &self.input_kind) {
-                                    self.input_kind = op
-                                        .input
-                                        .first()
-                                        .cloned()
-                                        .unwrap_or_else(|| "text".to_string());
+                            ui.horizontal(|ui| {
+                                let drag_source = ui.dnd_drag_source(
+                                    egui::Id::new(("operation-drag", &op.id)),
+                                    OperationDragPayload {
+                                        operation_id: op.id.clone(),
+                                    },
+                                    |ui| ui.selectable_label(selected, label),
+                                );
+                                if drag_source.inner.clicked() {
+                                    self.selected_operation = Some(op.id.clone());
+                                    if !op.input.iter().any(|kind| kind == &self.input_kind) {
+                                        self.input_kind = op
+                                            .input
+                                            .first()
+                                            .cloned()
+                                            .unwrap_or_else(|| "text".to_string());
+                                    }
                                 }
-                            }
+                                if ui.small_button("+").on_hover_text("加入配方链").clicked() {
+                                    operation_to_add = Some(op.id.clone());
+                                }
+                            });
                         }
                     });
+                    if let Some(operation_id) = operation_to_add {
+                        self.add_operation_to_recipe(&operation_id);
+                    }
                 } else {
                     ui.colored_label(egui::Color32::RED, "注册表加载失败");
                 }
@@ -360,90 +544,283 @@ impl eframe::App for CtfToolsApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if let Some(spec) = &selected_spec {
-                    ui.vertical(|ui| {
-                        ui.heading(&spec.name_zh);
+                ui.vertical(|ui| {
+                    ui.set_width(360.0);
+                    ui.horizontal(|ui| {
+                        ui.heading("配方链");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(format!("{} 步", self.recipe.len()));
+                        });
+                    });
+
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("运行配方").clicked() {
+                            self.run_recipe();
+                        }
+                        if let Some(operation_id) = self.selected_operation.clone()
+                            && ui.button("添加选中").clicked()
+                        {
+                            self.add_operation_to_recipe(&operation_id);
+                        }
+                        if ui.button("清空配方").clicked() {
+                            self.recipe.clear();
+                            self.trace.clear();
+                            self.last_status = "Recipe cleared".to_string();
+                        }
+                    });
+
+                    let mut move_step = None;
+                    let mut remove_step = None;
+                    let mut duplicate_step = None;
+                    let drop_frame = egui::Frame::group(ui.style())
+                        .inner_margin(egui::Margin::same(8))
+                        .fill(egui::Color32::from_rgb(13, 16, 20));
+                    let (_inner, dropped_operation) =
+                        ui.dnd_drop_zone::<OperationDragPayload, _>(drop_frame, |ui| {
+                            ui.set_min_height(300.0);
+                            if self.recipe.is_empty() {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(110.0);
+                                    ui.label(
+                                        egui::RichText::new("拖入工具")
+                                            .color(egui::Color32::from_rgb(120, 136, 154)),
+                                    );
+                                });
+                            } else {
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    for (index, step) in self.recipe.iter_mut().enumerate() {
+                                        let spec = self
+                                            .registry
+                                            .as_ref()
+                                            .and_then(|registry| registry.find(&step.operation_id));
+                                        let name = spec
+                                            .map(|spec| spec.name_zh.as_str())
+                                            .unwrap_or(step.operation_id.as_str());
+                                        let detail = spec
+                                            .map(|spec| {
+                                                format!(
+                                                    "{} · {} · {}",
+                                                    spec.id, spec.priority, spec.safety
+                                                )
+                                            })
+                                            .unwrap_or_else(|| step.operation_id.clone());
+
+                                        ui.horizontal(|ui| {
+                                            ui.checkbox(&mut step.enabled, "");
+                                            ui.label(
+                                                egui::RichText::new(format!("{}.", index + 1))
+                                                    .color(egui::Color32::from_rgb(130, 145, 160)),
+                                            );
+                                            ui.vertical(|ui| {
+                                                ui.label(egui::RichText::new(name).strong());
+                                                ui.label(
+                                                    egui::RichText::new(detail).small().color(
+                                                        egui::Color32::from_rgb(145, 158, 174),
+                                                    ),
+                                                );
+                                                if !step.output_preview.is_empty() {
+                                                    ui.label(
+                                                        egui::RichText::new(&step.output_preview)
+                                                            .small()
+                                                            .monospace()
+                                                            .color(egui::Color32::from_rgb(
+                                                                178, 188, 198,
+                                                            )),
+                                                    );
+                                                }
+                                            });
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    if ui.small_button("×").clicked() {
+                                                        remove_step = Some(index);
+                                                    }
+                                                    if ui.small_button("⧉").clicked() {
+                                                        duplicate_step = Some(index);
+                                                    }
+                                                    if ui.small_button("↓").clicked() {
+                                                        move_step = Some((index, 1));
+                                                    }
+                                                    if ui.small_button("↑").clicked() {
+                                                        move_step = Some((index, -1));
+                                                    }
+                                                    ui.label(
+                                                        egui::RichText::new(&step.last_status)
+                                                            .small()
+                                                            .color(status_color(&step.last_status)),
+                                                    );
+                                                },
+                                            );
+                                        });
+                                        ui.separator();
+                                    }
+                                });
+                            }
+                        });
+
+                    if let Some(payload) = dropped_operation {
+                        self.add_operation_to_recipe(&payload.operation_id);
+                    }
+                    if let Some((index, direction)) = move_step {
+                        self.move_recipe_step(index, direction);
+                    }
+                    if let Some(index) = duplicate_step
+                        && let Some(step) = self.recipe.get(index).cloned()
+                    {
+                        self.recipe.insert(index + 1, step);
+                        self.last_status = "Recipe updated".to_string();
+                    }
+                    if let Some(index) = remove_step {
+                        self.recipe.remove(index);
+                        self.last_status = "Recipe updated".to_string();
+                    }
+
+                    ui.separator();
+                    if let Some(spec) = &selected_spec {
+                        ui.label(egui::RichText::new("当前工具").strong());
+                        ui.label(&spec.name_zh);
                         ui.label(
-                            egui::RichText::new(format!("{} · {}", spec.id, spec.name_en))
-                                .color(egui::Color32::from_rgb(160, 172, 185)),
+                            egui::RichText::new(format!(
+                                "{} · {} · {}",
+                                spec.id, spec.backend, spec.safety
+                            ))
+                            .small()
+                            .color(egui::Color32::from_rgb(150, 164, 180)),
                         );
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(format!("{} / {}", spec.backend, spec.safety));
-                        ui.label(&spec.priority);
-                    });
-                } else {
-                    ui.heading("选择一个工具");
-                }
-            });
-            ui.separator();
-
-            if let Some(spec) = &selected_spec {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("输入");
-                    for kind in &spec.input {
-                        ui.selectable_value(&mut self.input_kind, kind.clone(), kind);
+                        ui.horizontal(|ui| {
+                            ui.label(format!("输出: {}", spec.output.join(" / ")));
+                            ui.separator();
+                            ui.label(category_title(&spec.category));
+                        });
                     }
-                    ui.separator();
-                    ui.label(format!("输出: {}", spec.output.join(" / ")));
-                    ui.separator();
-                    ui.label(format!("分类: {}", category_title(&spec.category)));
                 });
-            }
 
-            ui.add_space(6.0);
-            if self.input_kind == "file" {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.file_path)
-                        .hint_text("/path/to/file")
-                        .desired_width(f32::INFINITY),
-                );
-            } else {
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.input)
-                        .desired_rows(12)
-                        .desired_width(f32::INFINITY),
-                );
-            }
-
-            ui.horizontal(|ui| {
-                if ui.button("执行").clicked() {
-                    self.run_selected();
-                }
-                if ui.button("清空输入").clicked() {
-                    if self.input_kind == "file" {
-                        self.file_path.clear();
-                    } else {
-                        self.input.clear();
-                    }
-                }
-                if ui.button("复制结果").clicked() && !self.output.is_empty() {
-                    ctx.copy_text(self.output.clone());
-                    self.last_status = "Copied".to_string();
-                }
-            });
-
-            if !self.warnings.is_empty() {
                 ui.separator();
-                for warning in &self.warnings {
-                    ui.colored_label(egui::Color32::YELLOW, warning);
-                }
-            }
 
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.heading("结果");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{} bytes", self.output.len()));
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading("输入");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            for kind in ["file", "bytes", "text"] {
+                                ui.selectable_value(&mut self.input_kind, kind.to_string(), kind);
+                            }
+                        });
+                    });
+
+                    if self.input_kind == "file" {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.file_path)
+                                .hint_text("/path/to/file")
+                                .desired_width(f32::INFINITY),
+                        );
+                    } else {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.input)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_rows(12)
+                                .desired_width(f32::INFINITY),
+                        );
+                    }
+
+                    ui.horizontal(|ui| {
+                        if ui.button("运行配方").clicked() {
+                            self.run_recipe();
+                        }
+                        if ui.button("运行选中").clicked() {
+                            self.run_selected();
+                        }
+                        if ui.button("清空输入").clicked() {
+                            if self.input_kind == "file" {
+                                self.file_path.clear();
+                            } else {
+                                self.input.clear();
+                            }
+                        }
+                        if ui.button("复制结果").clicked() && !self.output.is_empty() {
+                            ctx.copy_text(self.output.clone());
+                            self.last_status = "Copied".to_string();
+                        }
+                    });
+
+                    if !self.trace.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            for item in &self.trace {
+                                ui.label(
+                                    egui::RichText::new(item)
+                                        .small()
+                                        .color(egui::Color32::from_rgb(142, 168, 192)),
+                                );
+                            }
+                        });
+                    }
+
+                    if !self.warnings.is_empty() {
+                        ui.separator();
+                        for warning in &self.warnings {
+                            ui.colored_label(egui::Color32::YELLOW, warning);
+                        }
+                    }
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.heading("结果");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(format!("{} bytes", self.output.len()));
+                        });
+                    });
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.output)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_rows(18)
+                            .desired_width(f32::INFINITY),
+                    );
                 });
             });
-            ui.add(
-                egui::TextEdit::multiline(&mut self.output)
-                    .font(egui::TextStyle::Monospace)
-                    .desired_rows(18)
-                    .desired_width(f32::INFINITY),
-            );
         });
+    }
+}
+
+fn chain_input_kind(spec: &OperationSpec, current_kind: &str) -> Option<String> {
+    if spec.input.iter().any(|kind| kind == current_kind) {
+        return Some(current_kind.to_string());
+    }
+    for fallback in ["text", "bytes"] {
+        if spec.input.iter().any(|kind| kind == fallback) {
+            return Some(fallback.to_string());
+        }
+    }
+    spec.input.first().cloned()
+}
+
+fn join_output_values(outputs: &[ctf_core::OperationOutput]) -> String {
+    outputs
+        .iter()
+        .map(|output| output.value.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn preview_text(value: &str) -> String {
+    const LIMIT: usize = 96;
+    let single_line = value.replace(['\r', '\n'], " ");
+    let mut preview = String::new();
+    for (index, character) in single_line.chars().enumerate() {
+        if index >= LIMIT {
+            preview.push_str("...");
+            return preview;
+        }
+        preview.push(character);
+    }
+    preview
+}
+
+fn status_color(status: &str) -> egui::Color32 {
+    match status {
+        "OK" => egui::Color32::from_rgb(90, 190, 130),
+        "Error" => egui::Color32::from_rgb(230, 105, 105),
+        "Skipped" => egui::Color32::from_rgb(145, 158, 174),
+        "Pending" => egui::Color32::from_rgb(230, 180, 90),
+        _ => egui::Color32::from_rgb(150, 164, 180),
     }
 }
 
