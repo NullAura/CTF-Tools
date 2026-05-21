@@ -5,6 +5,7 @@ use ctf_core::{
     CtfError, OperationOutput, OperationRequest, OperationResponse, OperationRunner, OperationSpec,
     Result,
 };
+use regex::Regex;
 use serde::Serialize;
 
 pub fn register_handlers(runner: &mut OperationRunner) {
@@ -14,6 +15,7 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("http.raw.to_curl", http_raw_to_curl);
     runner.register_handler("http.raw.to_fetch", http_raw_to_fetch);
     runner.register_handler("jwt.decode", jwt_decode);
+    runner.register_handler("assets.classify", assets_classify);
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -259,12 +261,79 @@ fn jwt_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
     })
 }
 
+fn assets_classify(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let text = request.input_text()?;
+    let urls = captures(&text, r#"https?://[^\s"'<>]+"#)?;
+    let ips = captures(
+        &text,
+        r#"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"#,
+    )?;
+    let emails = captures(
+        &text,
+        r#"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"#,
+    )?;
+    let phones = captures(&text, r#"\b1[3-9]\d{9}\b"#)?;
+    let id_cards = captures(&text, r#"\b\d{17}[\dXx]\b"#)?;
+    let domains = extract_domains(&text)?;
+    let c_classes = ips
+        .iter()
+        .filter_map(|ip| {
+            let mut parts = ip.split('.');
+            Some(format!(
+                "{}.{}.{}.0/24",
+                parts.next()?,
+                parts.next()?,
+                parts.next()?
+            ))
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    let value = serde_json::json!({
+        "urls": urls,
+        "domains": domains,
+        "ips": ips,
+        "c_classes": c_classes,
+        "emails": emails,
+        "phones": phones,
+        "id_cards": id_cards,
+        "scan_summary": {
+            "possible_fscan_lines": text.lines().filter(|line| line.contains("[+]") || line.contains("open")).count(),
+            "possible_vulnerability_lines": text.lines().filter(|line| line.to_ascii_lowercase().contains("poc") || line.contains("漏洞")).count(),
+        }
+    });
+
+    Ok(single_output(
+        "json",
+        "assets",
+        serde_json::to_string_pretty(&value)
+            .map_err(|error| CtfError::InvalidInput(error.to_string()))?,
+    ))
+}
+
 fn decode_jwt_part(part: &str) -> Result<serde_json::Value> {
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(part)
         .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(part))
         .map_err(|error| CtfError::InvalidInput(format!("invalid jwt base64: {error}")))?;
     serde_json::from_slice(&bytes).map_err(|error| CtfError::InvalidInput(error.to_string()))
+}
+
+fn captures(text: &str, pattern: &str) -> Result<Vec<String>> {
+    let regex = Regex::new(pattern).map_err(|error| CtfError::InvalidInput(error.to_string()))?;
+    Ok(regex
+        .find_iter(text)
+        .map(|item| item.as_str().trim_end_matches(['.', ',', ';']).to_string())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+fn extract_domains(text: &str) -> Result<Vec<String>> {
+    let mut domains = captures(text, r#"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b"#)?;
+    domains.retain(|domain| !domain.contains('@'));
+    Ok(domains)
 }
 
 fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
@@ -379,6 +448,22 @@ mod tests {
         let response = jwt_decode(&dummy_spec(), &request("jwt.decode", token)).expect("jwt");
         assert!(response.outputs[0].value.contains("\"sub\": \"123\""));
         assert_eq!(response.warnings[0], "JWT alg is none");
+    }
+
+    #[test]
+    fn assets_classify_groups_targets() {
+        let response = assets_classify(
+            &dummy_spec(),
+            &request(
+                "assets.classify",
+                "https://a.example.com/login 192.168.1.9 admin@example.com 13800138000",
+            ),
+        )
+        .expect("assets");
+        let value = &response.outputs[0].value;
+        assert!(value.contains("a.example.com"));
+        assert!(value.contains("192.168.1.0/24"));
+        assert!(value.contains("admin@example.com"));
     }
 
     fn dummy_spec() -> OperationSpec {

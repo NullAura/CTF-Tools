@@ -22,6 +22,7 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("ascii.encode", ascii_encode);
     runner.register_handler("hex.decode", hex_decode);
     runner.register_handler("hex.encode", hex_encode);
+    runner.register_handler("auto.decode", auto_decode);
 }
 
 fn base64_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
@@ -182,6 +183,47 @@ fn hex_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
     ))
 }
 
+fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let input = request.input_text()?;
+    let mut candidates = Vec::new();
+
+    if let Ok(response) = base64_decode(&dummy_operation("base64.decode"), request) {
+        push_candidate(&mut candidates, "base64.decode", &response.outputs[0].value);
+    }
+
+    if let Ok(response) = hex_decode(&dummy_operation("hex.decode"), request) {
+        push_candidate(&mut candidates, "hex.decode", &response.outputs[0].value);
+    }
+
+    if input.contains('%')
+        && let Ok(response) = url_decode(&dummy_operation("url.decode"), request)
+    {
+        push_candidate(&mut candidates, "url.decode", &response.outputs[0].value);
+    }
+
+    if input.contains("\\u")
+        && let Ok(response) = unicode_decode(&dummy_operation("unicode.decode"), request)
+    {
+        push_candidate(
+            &mut candidates,
+            "unicode.decode",
+            &response.outputs[0].value,
+        );
+    }
+
+    if input
+        .chars()
+        .all(|ch| ch.is_ascii_digit() || ch.is_ascii_whitespace() || ch == ',' || ch == ';')
+        && let Ok(response) = ascii_decode(&dummy_operation("ascii.decode"), request)
+    {
+        push_candidate(&mut candidates, "ascii.decode", &response.outputs[0].value);
+    }
+
+    candidates.sort_by(|a: &AutoCandidate, b| b.score.total_cmp(&a.score));
+    let value = serde_json_like_candidates(&candidates);
+    Ok(single_output("json", "auto", value))
+}
+
 fn push_codepoint(out: &mut String, hex: &str) -> Result<()> {
     let value = u32::from_str_radix(hex, 16)
         .map_err(|_| CtfError::InvalidInput(format!("invalid unicode escape: {hex}")))?;
@@ -211,6 +253,70 @@ fn single_output(kind: &str, label: &str, value: String) -> OperationResponse {
             value,
         }],
         warnings: vec![],
+    }
+}
+
+struct AutoCandidate {
+    path: String,
+    score: f32,
+    value: String,
+}
+
+fn push_candidate(candidates: &mut Vec<AutoCandidate>, path: &str, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    candidates.push(AutoCandidate {
+        path: path.to_string(),
+        score: score_text(value),
+        value: value.to_string(),
+    });
+}
+
+fn score_text(value: &str) -> f32 {
+    let printable = value
+        .chars()
+        .filter(|ch| !ch.is_control() || ch.is_ascii_whitespace())
+        .count() as f32;
+    let total = value.chars().count().max(1) as f32;
+    let mut score = printable / total;
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("flag{") || lower.contains("ctf{") {
+        score += 1.0;
+    }
+    score
+}
+
+fn serde_json_like_candidates(candidates: &[AutoCandidate]) -> String {
+    let items = candidates
+        .iter()
+        .take(8)
+        .map(|candidate| {
+            format!(
+                "{{\n    \"path\": {:?},\n    \"score\": {:.3},\n    \"value\": {:?}\n  }}",
+                candidate.path, candidate.score, candidate.value
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n  ");
+    format!("{{\n  \"candidates\": [\n  {items}\n  ]\n}}")
+}
+
+fn dummy_operation(id: &str) -> OperationSpec {
+    OperationSpec {
+        id: id.to_string(),
+        name_zh: id.to_string(),
+        name_en: id.to_string(),
+        category: "auto".to_string(),
+        aliases: vec![],
+        input: vec!["text".to_string()],
+        output: vec!["text".to_string()],
+        backend: "rust".to_string(),
+        safety: "safe".to_string(),
+        deterministic: true,
+        batchable: true,
+        priority: "P1".to_string(),
+        secrets: None,
     }
 }
 
@@ -249,6 +355,14 @@ mod tests {
             .value
             .clone();
         assert_eq!(decoded, "a b?");
+    }
+
+    #[test]
+    fn auto_decode_finds_base64_flag() {
+        let response = auto_decode(&dummy_spec(), &request("auto.decode", "ZmxhZ3t0ZXN0fQ=="))
+            .expect("auto decode");
+        assert!(response.outputs[0].value.contains("flag{test}"));
+        assert!(response.outputs[0].value.contains("base64.decode"));
     }
 
     fn dummy_spec() -> OperationSpec {

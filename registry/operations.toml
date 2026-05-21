@@ -312,6 +312,20 @@ batchable = true
 priority = "P1"
 
 [[operations]]
+id = "auto.decode"
+name_zh = "一键解码"
+name_en = "Auto Decode"
+category = "program.auto"
+aliases = ["自动解码", "一键编解码", "auto decode"]
+input = ["text", "file"]
+output = ["json", "ranked_text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "http.raw.parse"
 name_zh = "HTTP 请求包解析"
 name_en = "Parse Raw HTTP Request"
