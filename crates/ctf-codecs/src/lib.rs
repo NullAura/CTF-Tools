@@ -7,19 +7,40 @@ use ctf_core::{
 };
 use data_encoding::{BASE32, BASE32_NOPAD};
 
+const BASE45_ALPHABET: &[u8; 45] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
+const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE62_ALPHABET: &[u8; 62] =
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("base64.decode", base64_decode);
     runner.register_handler("base64.encode", base64_encode);
     runner.register_handler("base32.decode", base32_decode);
     runner.register_handler("base32.encode", base32_encode);
+    runner.register_handler("base45.decode", base45_decode);
+    runner.register_handler("base45.encode", base45_encode);
+    runner.register_handler("base58.decode", base58_decode);
+    runner.register_handler("base58.encode", base58_encode);
+    runner.register_handler("base62.decode", base62_decode);
+    runner.register_handler("base62.encode", base62_encode);
+    runner.register_handler("base85.decode", base85_decode);
+    runner.register_handler("base85.encode", base85_encode);
     runner.register_handler("url.decode", url_decode);
     runner.register_handler("url.encode", url_encode);
+    runner.register_handler("quoted_printable.decode", quoted_printable_decode);
+    runner.register_handler("quoted_printable.encode", quoted_printable_encode);
     runner.register_handler("html.decode", html_decode);
     runner.register_handler("html.encode", html_encode);
     runner.register_handler("unicode.decode", unicode_decode);
     runner.register_handler("unicode.encode", unicode_encode);
     runner.register_handler("ascii.decode", ascii_decode);
     runner.register_handler("ascii.encode", ascii_encode);
+    runner.register_handler("binary.decode", binary_decode);
+    runner.register_handler("binary.encode", binary_encode);
+    runner.register_handler("octal.decode", octal_decode);
+    runner.register_handler("octal.encode", octal_encode);
+    runner.register_handler("decimal.decode", decimal_decode);
+    runner.register_handler("decimal.encode", decimal_encode);
     runner.register_handler("hex.decode", hex_decode);
     runner.register_handler("hex.encode", hex_encode);
     runner.register_handler("radix.convert", radix_convert);
@@ -67,6 +88,66 @@ fn base32_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Op
     ))
 }
 
+fn base45_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_base45(&strip_ascii_ws(&request.input_text()?))?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn base45_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "base45",
+        encode_base45(&request.input_bytes()?),
+    ))
+}
+
+fn base58_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_base_n(
+        &strip_ascii_ws(&request.input_text()?),
+        BASE58_ALPHABET,
+        "base58",
+    )?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn base58_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "base58",
+        encode_base_n(&request.input_bytes()?, BASE58_ALPHABET),
+    ))
+}
+
+fn base62_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_base_n(
+        &strip_ascii_ws(&request.input_text()?),
+        BASE62_ALPHABET,
+        "base62",
+    )?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn base62_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "base62",
+        encode_base_n(&request.input_bytes()?, BASE62_ALPHABET),
+    ))
+}
+
+fn base85_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_ascii85(&request.input_text()?)?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn base85_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "base85",
+        encode_ascii85(&request.input_bytes()?),
+    ))
+}
+
 fn url_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let text = request.input_text()?;
     let decoded = urlencoding::decode(&text)
@@ -79,6 +160,25 @@ fn url_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
         "text",
         "url",
         urlencoding::encode(&request.input_text()?).into_owned(),
+    ))
+}
+
+fn quoted_printable_decode(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let bytes = decode_quoted_printable(&request.input_text()?)?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn quoted_printable_encode(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "quoted-printable",
+        encode_quoted_printable(&request.input_bytes()?),
     ))
 }
 
@@ -170,6 +270,60 @@ fn ascii_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Ope
         .collect::<Vec<_>>()
         .join(" ");
     Ok(single_output("text", "ascii", out))
+}
+
+fn binary_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_number_bytes(&request.input_text()?, 2, "binary")?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn binary_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "binary",
+        request
+            .input_bytes()?
+            .iter()
+            .map(|byte| format!("{byte:08b}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    ))
+}
+
+fn octal_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_number_bytes(&request.input_text()?, 8, "octal")?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn octal_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "octal",
+        request
+            .input_bytes()?
+            .iter()
+            .map(|byte| format!("{byte:03o}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    ))
+}
+
+fn decimal_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_number_bytes(&request.input_text()?, 10, "decimal")?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn decimal_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "decimal",
+        request
+            .input_bytes()?
+            .iter()
+            .map(|byte| byte.to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+    ))
 }
 
 fn hex_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
@@ -344,6 +498,33 @@ fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Oper
         push_candidate(&mut candidates, "hex.decode", &response.outputs[0].value);
     }
 
+    if let Ok(response) = base45_decode(&dummy_operation("base45.decode"), request) {
+        push_candidate(&mut candidates, "base45.decode", &response.outputs[0].value);
+    }
+
+    if let Ok(response) = base58_decode(&dummy_operation("base58.decode"), request) {
+        push_candidate(&mut candidates, "base58.decode", &response.outputs[0].value);
+    }
+
+    if let Ok(response) = base62_decode(&dummy_operation("base62.decode"), request) {
+        push_candidate(&mut candidates, "base62.decode", &response.outputs[0].value);
+    }
+
+    if let Ok(response) = base85_decode(&dummy_operation("base85.decode"), request) {
+        push_candidate(&mut candidates, "base85.decode", &response.outputs[0].value);
+    }
+
+    if input.contains('=')
+        && let Ok(response) =
+            quoted_printable_decode(&dummy_operation("quoted_printable.decode"), request)
+    {
+        push_candidate(
+            &mut candidates,
+            "quoted_printable.decode",
+            &response.outputs[0].value,
+        );
+    }
+
     if input.contains('%')
         && let Ok(response) = url_decode(&dummy_operation("url.decode"), request)
     {
@@ -387,6 +568,276 @@ fn strip_ascii_ws(value: &str) -> String {
         .chars()
         .filter(|ch| !ch.is_ascii_whitespace())
         .collect()
+}
+
+fn encode_base45(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in bytes.chunks(2) {
+        if chunk.len() == 2 {
+            let value = u16::from(chunk[0]) * 256 + u16::from(chunk[1]);
+            out.push(BASE45_ALPHABET[usize::from(value % 45)] as char);
+            out.push(BASE45_ALPHABET[usize::from((value / 45) % 45)] as char);
+            out.push(BASE45_ALPHABET[usize::from(value / (45 * 45))] as char);
+        } else {
+            let value = u16::from(chunk[0]);
+            out.push(BASE45_ALPHABET[usize::from(value % 45)] as char);
+            out.push(BASE45_ALPHABET[usize::from(value / 45)] as char);
+        }
+    }
+    out
+}
+
+fn decode_base45(text: &str) -> Result<Vec<u8>> {
+    let values = text
+        .bytes()
+        .map(|byte| {
+            BASE45_ALPHABET
+                .iter()
+                .position(|candidate| *candidate == byte)
+                .map(|value| value as u32)
+                .ok_or_else(|| CtfError::InvalidInput(format!("invalid base45 character: {byte}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut out = Vec::new();
+    let mut chunks = values.chunks_exact(3);
+    for chunk in &mut chunks {
+        let value = chunk[0] + chunk[1] * 45 + chunk[2] * 45 * 45;
+        if value > 0xffff {
+            return Err(CtfError::InvalidInput("invalid base45 triplet".to_string()));
+        }
+        out.push((value / 256) as u8);
+        out.push((value % 256) as u8);
+    }
+
+    match chunks.remainder() {
+        [] => {}
+        [first, second] => {
+            let value = first + second * 45;
+            if value > 0xff {
+                return Err(CtfError::InvalidInput("invalid base45 pair".to_string()));
+            }
+            out.push(value as u8);
+        }
+        [_] => {
+            return Err(CtfError::InvalidInput(
+                "base45 input cannot have length 1 modulo 3".to_string(),
+            ));
+        }
+        _ => unreachable!(),
+    }
+    Ok(out)
+}
+
+fn encode_base_n(bytes: &[u8], alphabet: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let base = alphabet.len() as u32;
+    let mut digits: Vec<u32> = vec![0];
+    for byte in bytes {
+        let mut carry = u32::from(*byte);
+        for digit in digits.iter_mut().rev() {
+            let value = *digit * 256 + carry;
+            *digit = value % base;
+            carry = value / base;
+        }
+        while carry > 0 {
+            digits.insert(0, carry % base);
+            carry /= base;
+        }
+    }
+
+    let leading_zeroes = bytes.iter().take_while(|byte| **byte == 0).count();
+    let mut out = String::new();
+    for _ in 0..leading_zeroes {
+        out.push(alphabet[0] as char);
+    }
+    let first_non_zero = digits
+        .iter()
+        .position(|digit| *digit != 0)
+        .unwrap_or(digits.len());
+    for digit in &digits[first_non_zero..] {
+        out.push(alphabet[*digit as usize] as char);
+    }
+    if out.is_empty() {
+        out.push(alphabet[0] as char);
+    }
+    out
+}
+
+fn decode_base_n(text: &str, alphabet: &[u8], name: &str) -> Result<Vec<u8>> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    let base = alphabet.len() as u32;
+    let mut bytes: Vec<u32> = vec![0];
+    for byte in text.bytes() {
+        let Some(mut carry) = alphabet
+            .iter()
+            .position(|candidate| *candidate == byte)
+            .map(|value| value as u32)
+        else {
+            return Err(CtfError::InvalidInput(format!(
+                "invalid {name} character: {byte}"
+            )));
+        };
+        for item in bytes.iter_mut().rev() {
+            let value = *item * base + carry;
+            *item = value & 0xff;
+            carry = value >> 8;
+        }
+        while carry > 0 {
+            bytes.insert(0, carry & 0xff);
+            carry >>= 8;
+        }
+    }
+
+    let leading_zeroes = text.bytes().take_while(|byte| *byte == alphabet[0]).count();
+    let first_non_zero = bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(bytes.len());
+    let mut out = vec![0; leading_zeroes];
+    out.extend(bytes[first_non_zero..].iter().map(|byte| *byte as u8));
+    Ok(out)
+}
+
+fn encode_ascii85(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in bytes.chunks(4) {
+        let mut block = [0u8; 4];
+        block[..chunk.len()].copy_from_slice(chunk);
+        let mut value = u32::from_be_bytes(block);
+        let mut encoded = [0u8; 5];
+        for item in encoded.iter_mut().rev() {
+            *item = (value % 85) as u8 + 33;
+            value /= 85;
+        }
+        let length = if chunk.len() == 4 { 5 } else { chunk.len() + 1 };
+        for byte in &encoded[..length] {
+            out.push(*byte as char);
+        }
+    }
+    out
+}
+
+fn decode_ascii85(text: &str) -> Result<Vec<u8>> {
+    let normalized = text
+        .trim()
+        .trim_start_matches("<~")
+        .trim_end_matches("~>")
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect::<String>();
+    let mut out = Vec::new();
+    let mut chunk = Vec::new();
+
+    for ch in normalized.bytes() {
+        if ch == b'z' && chunk.is_empty() {
+            out.extend_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        if !(33..=117).contains(&ch) {
+            return Err(CtfError::InvalidInput(format!(
+                "invalid base85 character: {ch}"
+            )));
+        }
+        chunk.push(ch - 33);
+        if chunk.len() == 5 {
+            out.extend_from_slice(&decode_ascii85_chunk(&chunk, 4)?);
+            chunk.clear();
+        }
+    }
+
+    if !chunk.is_empty() {
+        if chunk.len() == 1 {
+            return Err(CtfError::InvalidInput(
+                "base85 trailing chunk is too short".to_string(),
+            ));
+        }
+        let output_len = chunk.len() - 1;
+        while chunk.len() < 5 {
+            chunk.push(84);
+        }
+        out.extend_from_slice(&decode_ascii85_chunk(&chunk, output_len)?);
+    }
+
+    Ok(out)
+}
+
+fn decode_ascii85_chunk(chunk: &[u8], output_len: usize) -> Result<Vec<u8>> {
+    let mut value = 0u32;
+    for digit in chunk {
+        value = value
+            .checked_mul(85)
+            .and_then(|value| value.checked_add(u32::from(*digit)))
+            .ok_or_else(|| CtfError::InvalidInput("base85 value overflow".to_string()))?;
+    }
+    Ok(value.to_be_bytes()[..output_len].to_vec())
+}
+
+fn decode_number_bytes(text: &str, radix: u32, name: &str) -> Result<Vec<u8>> {
+    text.split(|ch: char| ch.is_ascii_whitespace() || ch == ',' || ch == ';')
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            u8::from_str_radix(token, radix)
+                .map_err(|error| CtfError::InvalidInput(format!("invalid {name} byte: {error}")))
+        })
+        .collect()
+}
+
+fn encode_quoted_printable(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for (index, byte) in bytes.iter().enumerate() {
+        let next = bytes.get(index + 1).copied();
+        match *byte {
+            b'\r' => out.push('\r'),
+            b'\n' => out.push('\n'),
+            b'\t' | b' ' if matches!(next, Some(b'\r') | Some(b'\n') | None) => {
+                out.push_str(&format!("={byte:02X}"));
+            }
+            b'\t' | b' ' => out.push(*byte as char),
+            33..=60 | 62..=126 => out.push(*byte as char),
+            _ => out.push_str(&format!("={byte:02X}")),
+        }
+    }
+    out
+}
+
+fn decode_quoted_printable(text: &str) -> Result<Vec<u8>> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'=' {
+            out.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        match bytes.get(index + 1) {
+            Some(b'\n') => index += 2,
+            Some(b'\r') if bytes.get(index + 2) == Some(&b'\n') => index += 3,
+            Some(first) if index + 2 < bytes.len() => {
+                let second = bytes[index + 2];
+                let hex = [*first, second];
+                let hex = std::str::from_utf8(&hex)
+                    .map_err(|_| CtfError::InvalidInput("invalid quoted-printable".to_string()))?;
+                let value = u8::from_str_radix(hex, 16).map_err(|_| {
+                    CtfError::InvalidInput(format!("invalid quoted-printable escape: ={hex}"))
+                })?;
+                out.push(value);
+                index += 3;
+            }
+            _ => {
+                return Err(CtfError::InvalidInput(
+                    "truncated quoted-printable escape".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn bytes_to_display(bytes: Vec<u8>) -> String {
@@ -806,6 +1257,78 @@ mod tests {
     }
 
     #[test]
+    fn cyberchef_base_codecs_round_trip() {
+        for (encode, decode, expected) in [
+            (
+                base45_encode as fn(&OperationSpec, &OperationRequest) -> Result<OperationResponse>,
+                base45_decode as fn(&OperationSpec, &OperationRequest) -> Result<OperationResponse>,
+                "U.C5ECERF6$CVWE",
+            ),
+            (base58_encode, base58_decode, "6kkZv8vnrSZmwa"),
+            (base62_encode, base62_decode, "2Pv0yKojtq1Aqb"),
+            (base85_encode, base85_decode, "Ao(mgHZWh?FF="),
+        ] {
+            let encoded = encode(&dummy_spec(), &request("codec.encode", "flag{test}"))
+                .expect("encode")
+                .outputs[0]
+                .value
+                .clone();
+            assert_eq!(encoded, expected);
+            let decoded = decode(&dummy_spec(), &request("codec.decode", &encoded))
+                .expect("decode")
+                .outputs[0]
+                .value
+                .clone();
+            assert_eq!(decoded, "flag{test}");
+        }
+    }
+
+    #[test]
+    fn numeric_byte_codecs_round_trip() {
+        let binary = binary_encode(&dummy_spec(), &request("binary.encode", "Hi"))
+            .expect("binary encode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(binary, "01001000 01101001");
+        assert_eq!(
+            binary_decode(&dummy_spec(), &request("binary.decode", &binary))
+                .expect("binary decode")
+                .outputs[0]
+                .value,
+            "Hi"
+        );
+
+        let octal = octal_encode(&dummy_spec(), &request("octal.encode", "Hi"))
+            .expect("octal encode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(octal, "110 151");
+        assert_eq!(
+            octal_decode(&dummy_spec(), &request("octal.decode", &octal))
+                .expect("octal decode")
+                .outputs[0]
+                .value,
+            "Hi"
+        );
+
+        let decimal = decimal_encode(&dummy_spec(), &request("decimal.encode", "Hi"))
+            .expect("decimal encode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(decimal, "72 105");
+        assert_eq!(
+            decimal_decode(&dummy_spec(), &request("decimal.decode", &decimal))
+                .expect("decimal decode")
+                .outputs[0]
+                .value,
+            "Hi"
+        );
+    }
+
+    #[test]
     fn url_round_trips() {
         let encoded = url_encode(&dummy_spec(), &request("url.encode", "a b?"))
             .expect("url should encode")
@@ -818,6 +1341,26 @@ mod tests {
             .value
             .clone();
         assert_eq!(decoded, "a b?");
+    }
+
+    #[test]
+    fn quoted_printable_round_trips() {
+        let encoded = quoted_printable_encode(
+            &dummy_spec(),
+            &request("quoted_printable.encode", "flag{测试}"),
+        )
+        .expect("quoted printable encode")
+        .outputs[0]
+            .value
+            .clone();
+        assert!(encoded.contains("=E6=B5=8B=E8=AF=95"));
+        let decoded =
+            quoted_printable_decode(&dummy_spec(), &request("quoted_printable.decode", &encoded))
+                .expect("quoted printable decode")
+                .outputs[0]
+                .value
+                .clone();
+        assert_eq!(decoded, "flag{测试}");
     }
 
     #[test]

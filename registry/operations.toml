@@ -32,6 +32,118 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "base45.decode"
+name_zh = "Base45 解码"
+name_en = "Base45 Decode"
+category = "codecs.base"
+aliases = ["b45", "base45decode", "base45解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base45.encode"
+name_zh = "Base45 编码"
+name_en = "Base45 Encode"
+category = "codecs.base"
+aliases = ["b45", "base45encode", "base45编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base58.decode"
+name_zh = "Base58 解码"
+name_en = "Base58 Decode"
+category = "codecs.base"
+aliases = ["b58", "bitcoin base58", "base58解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base58.encode"
+name_zh = "Base58 编码"
+name_en = "Base58 Encode"
+category = "codecs.base"
+aliases = ["b58", "bitcoin base58", "base58编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base62.decode"
+name_zh = "Base62 解码"
+name_en = "Base62 Decode"
+category = "codecs.base"
+aliases = ["b62", "base62decode", "base62解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base62.encode"
+name_zh = "Base62 编码"
+name_en = "Base62 Encode"
+category = "codecs.base"
+aliases = ["b62", "base62encode", "base62编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base85.decode"
+name_zh = "Base85 解码"
+name_en = "Base85 Decode"
+category = "codecs.base"
+aliases = ["ascii85", "base85decode", "base85解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "base85.encode"
+name_zh = "Base85 编码"
+name_en = "Base85 Encode"
+category = "codecs.base"
+aliases = ["ascii85", "base85encode", "base85编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "url.decode"
 name_zh = "URL 解码"
 name_en = "URL Decode"
@@ -86,6 +198,34 @@ safety = "safe"
 deterministic = true
 batchable = true
 priority = "P0"
+
+[[operations]]
+id = "quoted_printable.decode"
+name_zh = "Quoted Printable 解码"
+name_en = "Quoted Printable Decode"
+category = "codecs.web"
+aliases = ["qp decode", "quoted printable decode", "quoted printable解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "quoted_printable.encode"
+name_zh = "Quoted Printable 编码"
+name_en = "Quoted Printable Encode"
+category = "codecs.web"
+aliases = ["qp encode", "quoted printable encode", "quoted printable编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
 
 [[operations]]
 id = "html.decode"
@@ -170,6 +310,90 @@ safety = "safe"
 deterministic = true
 batchable = true
 priority = "P0"
+
+[[operations]]
+id = "binary.decode"
+name_zh = "Binary 解码"
+name_en = "From Binary"
+category = "codecs.binary"
+aliases = ["from binary", "binary to text", "二进制解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "binary.encode"
+name_zh = "Binary 编码"
+name_en = "To Binary"
+category = "codecs.binary"
+aliases = ["to binary", "text to binary", "二进制编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "octal.decode"
+name_zh = "Octal 解码"
+name_en = "From Octal"
+category = "codecs.binary"
+aliases = ["from octal", "octal to text", "八进制解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "octal.encode"
+name_zh = "Octal 编码"
+name_en = "To Octal"
+category = "codecs.binary"
+aliases = ["to octal", "text to octal", "八进制编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "decimal.decode"
+name_zh = "Decimal 解码"
+name_en = "From Decimal"
+category = "codecs.binary"
+aliases = ["from decimal", "decimal to text", "十进制解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "decimal.encode"
+name_zh = "Decimal 编码"
+name_en = "To Decimal"
+category = "codecs.binary"
+aliases = ["to decimal", "text to decimal", "十进制编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
 
 [[operations]]
 id = "hex.decode"
