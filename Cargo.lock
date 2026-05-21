@@ -849,6 +849,7 @@ name = "ctf-app"
 version = "0.1.0"
 dependencies = [
  "ctf-core",
+ "ctf-launcher",
  "ctf-runner",
  "eframe",
  "egui",
@@ -899,6 +900,15 @@ dependencies = [
  "sha2",
  "sha3",
  "sm3",
+]
+
+[[package]]
+name = "ctf-launcher"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

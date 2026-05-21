@@ -1,9 +1,17 @@
 use ctf_core::{OperationInput, OperationRegistry, OperationRequest, OperationSpec, TaskLimits};
 use eframe::egui;
 
+mod launcher_ui;
+
 #[derive(Debug, Clone)]
 struct OperationDragPayload {
     operation_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppWorkspace {
+    Operations,
+    Launcher,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +39,20 @@ impl Language {
         match self {
             Self::English => "Language",
             Self::Chinese => "语言",
+        }
+    }
+
+    fn operations_workspace(self) -> &'static str {
+        match self {
+            Self::English => "Operations",
+            Self::Chinese => "工具流水线",
+        }
+    }
+
+    fn launcher_workspace(self) -> &'static str {
+        match self {
+            Self::English => "Launcher",
+            Self::Chinese => "工具启动器",
         }
     }
 
@@ -364,6 +386,8 @@ fn install_style(ctx: &egui::Context) {
 struct CtfToolsApp {
     registry: Option<OperationRegistry>,
     language: Language,
+    workspace: AppWorkspace,
+    launcher: launcher_ui::LauncherUiState,
     query: String,
     active_category: String,
     selected_operation: Option<String>,
@@ -392,6 +416,8 @@ impl CtfToolsApp {
         Self {
             registry,
             language: Language::English,
+            workspace: AppWorkspace::Operations,
+            launcher: launcher_ui::LauncherUiState::load(),
             query: String::new(),
             active_category: "all".to_string(),
             selected_operation,
@@ -682,6 +708,17 @@ impl eframe::App for CtfToolsApp {
             ui.horizontal(|ui| {
                 ui.heading("CTF Tools");
                 ui.label(language.app_subtitle());
+                ui.separator();
+                ui.selectable_value(
+                    &mut self.workspace,
+                    AppWorkspace::Operations,
+                    language.operations_workspace(),
+                );
+                ui.selectable_value(
+                    &mut self.workspace,
+                    AppWorkspace::Launcher,
+                    language.launcher_workspace(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.menu_button(self.language.settings(), |ui| {
                         ui.label(self.language.language_label());
@@ -699,6 +736,11 @@ impl eframe::App for CtfToolsApp {
             });
             ui.add_space(4.0);
         });
+
+        if self.workspace == AppWorkspace::Launcher {
+            self.render_launcher(ctx);
+            return;
+        }
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
