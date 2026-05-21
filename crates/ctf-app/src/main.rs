@@ -52,6 +52,67 @@ pub(crate) enum Language {
     Chinese,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UiTokens {
+    pub bg: egui::Color32,
+    pub panel: egui::Color32,
+    pub panel_alt: egui::Color32,
+    pub card: egui::Color32,
+    pub card_hover: egui::Color32,
+    pub card_selected: egui::Color32,
+    pub border: egui::Color32,
+    pub text: egui::Color32,
+    pub muted: egui::Color32,
+    pub dim: egui::Color32,
+    pub accent: egui::Color32,
+    pub accent_soft: egui::Color32,
+    pub success: egui::Color32,
+    pub warning: egui::Color32,
+    pub danger: egui::Color32,
+    pub input_bg: egui::Color32,
+}
+
+pub(crate) fn ui_tokens(theme: AppTheme) -> UiTokens {
+    match theme {
+        AppTheme::Dark => UiTokens {
+            bg: egui::Color32::from_rgb(10, 12, 16),
+            panel: egui::Color32::from_rgb(16, 19, 24),
+            panel_alt: egui::Color32::from_rgb(21, 25, 32),
+            card: egui::Color32::from_rgb(23, 28, 36),
+            card_hover: egui::Color32::from_rgb(31, 38, 49),
+            card_selected: egui::Color32::from_rgb(27, 68, 98),
+            border: egui::Color32::from_rgb(49, 57, 70),
+            text: egui::Color32::from_rgb(232, 237, 243),
+            muted: egui::Color32::from_rgb(158, 170, 184),
+            dim: egui::Color32::from_rgb(105, 116, 130),
+            accent: egui::Color32::from_rgb(58, 145, 202),
+            accent_soft: egui::Color32::from_rgb(23, 55, 76),
+            success: egui::Color32::from_rgb(86, 179, 125),
+            warning: egui::Color32::from_rgb(221, 174, 77),
+            danger: egui::Color32::from_rgb(220, 92, 92),
+            input_bg: egui::Color32::from_rgb(9, 12, 17),
+        },
+        AppTheme::Light => UiTokens {
+            bg: egui::Color32::from_rgb(238, 242, 247),
+            panel: egui::Color32::from_rgb(248, 250, 252),
+            panel_alt: egui::Color32::from_rgb(241, 245, 249),
+            card: egui::Color32::from_rgb(255, 255, 255),
+            card_hover: egui::Color32::from_rgb(236, 244, 250),
+            card_selected: egui::Color32::from_rgb(210, 234, 248),
+            border: egui::Color32::from_rgb(202, 213, 225),
+            text: egui::Color32::from_rgb(18, 24, 38),
+            muted: egui::Color32::from_rgb(78, 91, 108),
+            dim: egui::Color32::from_rgb(126, 139, 155),
+            accent: egui::Color32::from_rgb(28, 118, 172),
+            accent_soft: egui::Color32::from_rgb(219, 238, 249),
+            success: egui::Color32::from_rgb(40, 145, 92),
+            warning: egui::Color32::from_rgb(170, 116, 30),
+            danger: egui::Color32::from_rgb(190, 63, 63),
+            input_bg: egui::Color32::from_rgb(255, 255, 255),
+        },
+    }
+}
+
 impl Language {
     fn app_subtitle(self) -> &'static str {
         match self {
@@ -329,6 +390,7 @@ struct OperationListItem {
     priority: String,
     safety: String,
     input: Vec<String>,
+    output: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -395,40 +457,188 @@ fn install_cjk_font(ctx: &egui::Context) {
 }
 
 pub(crate) fn install_style_for(ctx: &egui::Context, theme: AppTheme) {
+    let tokens = ui_tokens(theme);
     let mut visuals = match theme {
         AppTheme::Dark => egui::Visuals::dark(),
         AppTheme::Light => egui::Visuals::light(),
     };
-    match theme {
-        AppTheme::Dark => {
-            visuals.panel_fill = egui::Color32::from_rgb(18, 20, 24);
-            visuals.window_fill = egui::Color32::from_rgb(20, 23, 28);
-            visuals.extreme_bg_color = egui::Color32::from_rgb(8, 10, 13);
-            visuals.selection.bg_fill = egui::Color32::from_rgb(36, 112, 160);
-            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(35, 39, 47);
-            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(46, 53, 63);
-            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(45, 122, 170);
-        }
-        AppTheme::Light => {
-            visuals.panel_fill = egui::Color32::from_rgb(242, 245, 248);
-            visuals.window_fill = egui::Color32::from_rgb(250, 252, 254);
-            visuals.extreme_bg_color = egui::Color32::from_rgb(228, 234, 240);
-            visuals.selection.bg_fill = egui::Color32::from_rgb(35, 120, 170);
-            visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(232, 237, 243);
-            visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(220, 229, 238);
-            visuals.widgets.active.bg_fill = egui::Color32::from_rgb(190, 220, 238);
-        }
-    }
+    visuals.panel_fill = tokens.bg;
+    visuals.window_fill = tokens.panel;
+    visuals.extreme_bg_color = tokens.bg;
+    visuals.override_text_color = Some(tokens.text);
+    visuals.selection.bg_fill = tokens.accent;
+    visuals.selection.stroke.color = tokens.text;
+    visuals.widgets.noninteractive.bg_fill = tokens.panel;
+    visuals.widgets.noninteractive.fg_stroke.color = tokens.text;
+    visuals.widgets.inactive.bg_fill = tokens.panel_alt;
+    visuals.widgets.inactive.fg_stroke.color = tokens.text;
+    visuals.widgets.hovered.bg_fill = tokens.card_hover;
+    visuals.widgets.hovered.fg_stroke.color = tokens.text;
+    visuals.widgets.active.bg_fill = tokens.accent;
+    visuals.widgets.active.fg_stroke.color = tokens.text;
+    visuals.widgets.open.bg_fill = tokens.card_hover;
+    visuals.window_stroke.color = tokens.border;
     ctx.set_visuals(visuals);
 
     let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-    style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    style.spacing.item_spacing = egui::vec2(8.0, 7.0);
+    style.spacing.button_padding = egui::vec2(11.0, 6.0);
+    style.spacing.menu_margin = egui::Margin::same(8);
+    style.spacing.window_margin = egui::Margin::same(10);
     style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
     style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
     style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
     style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(6);
     ctx.set_style(style);
+}
+
+pub(crate) fn panel_frame(theme: AppTheme) -> egui::Frame {
+    let tokens = ui_tokens(theme);
+    egui::Frame::new()
+        .fill(tokens.panel)
+        .stroke(egui::Stroke::new(1.0, tokens.border))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+}
+
+pub(crate) fn card_frame(theme: AppTheme, selected: bool) -> egui::Frame {
+    let tokens = ui_tokens(theme);
+    egui::Frame::new()
+        .fill(if selected {
+            tokens.card_selected
+        } else {
+            tokens.card
+        })
+        .stroke(egui::Stroke::new(
+            1.0,
+            if selected {
+                tokens.accent
+            } else {
+                tokens.border
+            },
+        ))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+}
+
+pub(crate) fn section_heading(
+    ui: &mut egui::Ui,
+    theme: AppTheme,
+    title: &str,
+    detail: Option<&str>,
+) {
+    let tokens = ui_tokens(theme);
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(title)
+                .strong()
+                .size(14.0)
+                .color(tokens.text),
+        );
+        if let Some(detail) = detail {
+            ui.label(egui::RichText::new(detail).small().color(tokens.dim));
+        }
+    });
+}
+
+pub(crate) fn badge(
+    ui: &mut egui::Ui,
+    theme: AppTheme,
+    text: impl Into<String>,
+    fill: egui::Color32,
+) -> egui::Response {
+    let tokens = ui_tokens(theme);
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(egui::CornerRadius::same(5))
+        .inner_margin(egui::Margin::symmetric(7, 3))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text.into())
+                    .small()
+                    .strong()
+                    .color(tokens.text),
+            )
+        })
+        .inner
+}
+
+fn primary_button(ui: &mut egui::Ui, theme: AppTheme, label: &str) -> egui::Response {
+    let tokens = ui_tokens(theme);
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).strong().color(tokens.text))
+            .fill(tokens.accent)
+            .stroke(egui::Stroke::new(1.0, tokens.accent)),
+    )
+}
+
+fn soft_button(ui: &mut egui::Ui, theme: AppTheme, label: &str) -> egui::Response {
+    let tokens = ui_tokens(theme);
+    ui.add(
+        egui::Button::new(label)
+            .fill(tokens.panel_alt)
+            .stroke(egui::Stroke::new(1.0, tokens.border)),
+    )
+}
+
+fn panel_toggle(ui: &mut egui::Ui, visible: &mut bool, label: &str) {
+    let icon = if *visible { "-" } else { "+" };
+    if ui.small_button(format!("{icon} {label}")).clicked() {
+        *visible = !*visible;
+    }
+}
+
+fn text(language: Language, english: &'static str, chinese: &'static str) -> &'static str {
+    match language {
+        Language::English => english,
+        Language::Chinese => chinese,
+    }
+}
+
+fn priority_fill(theme: AppTheme, priority: &str) -> egui::Color32 {
+    let tokens = ui_tokens(theme);
+    match priority {
+        "P0" => tokens.accent,
+        "P1" => tokens.accent_soft,
+        _ => tokens.panel_alt,
+    }
+}
+
+fn safety_fill(theme: AppTheme, safety: &str) -> egui::Color32 {
+    let tokens = ui_tokens(theme);
+    match safety {
+        "safe" => tokens.success,
+        "network" | "external" => tokens.warning,
+        "dangerous" => tokens.danger,
+        _ => tokens.panel_alt,
+    }
+}
+
+fn status_fill(theme: AppTheme, status: &str) -> egui::Color32 {
+    let tokens = ui_tokens(theme);
+    match status {
+        "OK" | "Ready" => tokens.success,
+        "Error" => tokens.danger,
+        "Pending" => tokens.warning,
+        "Skipped" => tokens.panel_alt,
+        _ => tokens.accent_soft,
+    }
+}
+
+fn empty_state(ui: &mut egui::Ui, theme: AppTheme, title: &str, body: &str) {
+    let tokens = ui_tokens(theme);
+    ui.vertical_centered(|ui| {
+        ui.add_space(28.0);
+        ui.label(
+            egui::RichText::new(title)
+                .strong()
+                .size(15.0)
+                .color(tokens.muted),
+        );
+        ui.label(egui::RichText::new(body).small().color(tokens.dim));
+        ui.add_space(28.0);
+    });
 }
 
 struct CtfToolsApp {
@@ -449,6 +659,11 @@ struct CtfToolsApp {
     warnings: Vec<String>,
     last_status: String,
     is_fullscreen: bool,
+    show_categories: bool,
+    show_tool_library: bool,
+    show_recipe: bool,
+    show_details: bool,
+    show_launcher_editor: bool,
 }
 
 impl CtfToolsApp {
@@ -483,6 +698,11 @@ impl CtfToolsApp {
             warnings: Vec::new(),
             last_status: "Ready".to_string(),
             is_fullscreen: false,
+            show_categories: true,
+            show_tool_library: true,
+            show_recipe: true,
+            show_details: true,
+            show_launcher_editor: true,
         }
     }
 
@@ -736,6 +956,7 @@ impl CtfToolsApp {
                 priority: op.priority.clone(),
                 safety: op.safety.clone(),
                 input: op.input.clone(),
+                output: op.output.clone(),
             })
             .collect::<Vec<_>>();
         operations.sort_by(|a, b| {
@@ -746,12 +967,102 @@ impl CtfToolsApp {
         });
         operations
     }
-}
 
-impl eframe::App for CtfToolsApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        install_style_for(ctx, self.theme);
-        self.handle_global_shortcuts(ctx);
+    fn render_top_toolbar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, total_tools: usize) {
+        let tokens = ui_tokens(self.theme);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("CTF Tools")
+                    .strong()
+                    .size(18.0)
+                    .color(tokens.text),
+            );
+            ui.label(egui::RichText::new(self.language.app_subtitle()).color(tokens.muted));
+            ui.separator();
+            ui.selectable_value(
+                &mut self.workspace,
+                AppWorkspace::Operations,
+                self.language.operations_workspace(),
+            );
+            ui.selectable_value(
+                &mut self.workspace,
+                AppWorkspace::Launcher,
+                self.language.launcher_workspace(),
+            );
+
+            if self.workspace == AppWorkspace::Operations {
+                ui.separator();
+                panel_toggle(
+                    ui,
+                    &mut self.show_categories,
+                    text(self.language, "Categories", "分类"),
+                );
+                panel_toggle(
+                    ui,
+                    &mut self.show_tool_library,
+                    text(self.language, "Tools", "工具"),
+                );
+                panel_toggle(
+                    ui,
+                    &mut self.show_recipe,
+                    text(self.language, "Recipe", "配方"),
+                );
+                panel_toggle(
+                    ui,
+                    &mut self.show_details,
+                    text(self.language, "Details", "详情"),
+                );
+            } else {
+                ui.separator();
+                panel_toggle(
+                    ui,
+                    &mut self.show_launcher_editor,
+                    text(self.language, "Inspector", "检查器"),
+                );
+            }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(self.language.settings(), |ui| {
+                    ui.label(self.language.language_label());
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.language, Language::English, "English");
+                        ui.selectable_value(&mut self.language, Language::Chinese, "中文");
+                    });
+                    ui.separator();
+                    ui.label(text(self.language, "Theme", "主题"));
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(self.theme == AppTheme::Dark, "Dark")
+                            .clicked()
+                        {
+                            self.set_app_theme(ctx, AppTheme::Dark);
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_label(self.theme == AppTheme::Light, "Light")
+                            .clicked()
+                        {
+                            self.set_app_theme(ctx, AppTheme::Light);
+                            ui.close();
+                        }
+                    });
+                });
+                ui.separator();
+                badge(
+                    ui,
+                    self.theme,
+                    &self.last_status,
+                    status_fill(self.theme, &self.last_status),
+                );
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(self.language.tools_count(total_tools)).color(tokens.muted),
+                );
+            });
+        });
+    }
+
+    fn render_operations_workspace(&mut self, ctx: &egui::Context) {
         let language = self.language;
         let selected_spec = self.registry.as_ref().and_then(|registry| {
             self.selected_operation
@@ -782,403 +1093,582 @@ impl eframe::App for CtfToolsApp {
             .find(|group| group.id == self.active_category)
             .unwrap_or(&categories[0]);
 
-        egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.heading("CTF Tools");
-                ui.label(language.app_subtitle());
-                ui.separator();
-                ui.selectable_value(
-                    &mut self.workspace,
-                    AppWorkspace::Operations,
-                    language.operations_workspace(),
-                );
-                ui.selectable_value(
-                    &mut self.workspace,
-                    AppWorkspace::Launcher,
-                    language.launcher_workspace(),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.menu_button(self.language.settings(), |ui| {
-                        ui.label(self.language.language_label());
-                        ui.separator();
-                        ui.selectable_value(&mut self.language, Language::English, "English");
-                        ui.selectable_value(&mut self.language, Language::Chinese, "中文");
+        if self.show_categories || self.show_tool_library {
+            egui::SidePanel::left("operations_library")
+                .resizable(true)
+                .default_width(400.0)
+                .width_range(280.0..=520.0)
+                .show(ctx, |ui| {
+                    panel_frame(self.theme).show(ui, |ui| {
+                        if self.show_categories {
+                            self.render_category_nav(ui, &categories, &category_counts);
+                        }
+                        if self.show_categories && self.show_tool_library {
+                            ui.separator();
+                        }
+                        if self.show_tool_library {
+                            self.render_tool_library(ui, active_group, &visible_operations);
+                        }
                     });
-                    ui.separator();
-                    ui.label(format!("Status: {}", self.last_status));
-                    if let Some(registry) = &self.registry {
-                        ui.separator();
-                        ui.label(language.tools_count(registry.operations().len()));
-                    }
                 });
-            });
-            ui.add_space(4.0);
-        });
-
-        if self.workspace == AppWorkspace::Launcher {
-            self.render_launcher(ctx);
-            return;
         }
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(active_group.label(language));
-                ui.separator();
-                ui.label(active_group.hint(language));
-                if let Some(spec) = &selected_spec {
-                    ui.separator();
-                    ui.label(format!(
-                        "{} · {} · {}",
-                        spec.category, spec.backend, spec.safety
-                    ));
-                }
-            });
-        });
-
-        egui::SidePanel::left("categories")
-            .resizable(false)
-            .default_width(220.0)
+        egui::TopBottomPanel::bottom("operations_status")
+            .exact_height(28.0)
             .show(ctx, |ui| {
-                ui.heading(language.categories_heading());
-                ui.add_space(6.0);
-                if self.registry.is_some() {
-                    for (group, count) in categories.iter().zip(category_counts.iter()) {
-                        let selected = self.active_category == group.id;
-                        let response = ui.selectable_label(
-                            selected,
-                            format!(
-                                "{}\n{}",
-                                group.label(language),
-                                language.tools_count(*count)
-                            ),
+                let tokens = ui_tokens(self.theme);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(egui::RichText::new(active_group.label(language)).color(tokens.text));
+                    ui.separator();
+                    ui.label(egui::RichText::new(active_group.hint(language)).color(tokens.muted));
+                    if let Some(spec) = &selected_spec {
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} · {} · {}",
+                                spec.category, spec.backend, spec.safety
+                            ))
+                            .color(tokens.muted),
                         );
-                        if response.clicked() {
-                            self.select_category(group.id);
-                        }
-                        response.on_hover_text(group.hint(language));
                     }
-                } else {
-                    ui.colored_label(egui::Color32::RED, language.registry_load_failed());
-                }
-            });
-
-        egui::SidePanel::left("operations")
-            .resizable(true)
-            .default_width(330.0)
-            .show(ctx, |ui| {
-                ui.heading(active_group.label(language));
-                ui.label(active_group.hint(language));
-                ui.add_space(4.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.query).hint_text(language.search_hint()),
-                );
-                ui.separator();
-
-                if self.registry.is_some() {
-                    ui.horizontal(|ui| {
-                        ui.label(language.tools_count(visible_operations.len()));
-                        if !self.query.is_empty() && ui.button(language.clear_search()).clicked() {
-                            self.query.clear();
-                        }
-                    });
-                    ui.separator();
-                    let mut previous_category = String::new();
-                    let mut operation_to_add = None;
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for op in &visible_operations {
-                            if previous_category != op.category {
-                                previous_category = op.category.clone();
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new(category_title(&op.category, language))
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(150, 170, 190)),
-                                );
-                            }
-                            let selected = self.selected_operation.as_deref() == Some(&op.id);
-                            let label = format!(
-                                "{}\n{} · {} · {}",
-                                language.operation_item_name(op),
-                                op.id,
-                                op.priority,
-                                op.safety
-                            );
-                            ui.horizontal(|ui| {
-                                let drag_source = ui.dnd_drag_source(
-                                    egui::Id::new(("operation-drag", &op.id)),
-                                    OperationDragPayload {
-                                        operation_id: op.id.clone(),
-                                    },
-                                    |ui| ui.selectable_label(selected, label),
-                                );
-                                if drag_source.inner.clicked() {
-                                    self.selected_operation = Some(op.id.clone());
-                                    if !op.input.iter().any(|kind| kind == &self.input_kind) {
-                                        self.input_kind = op
-                                            .input
-                                            .first()
-                                            .cloned()
-                                            .unwrap_or_else(|| "text".to_string());
-                                    }
-                                }
-                                if ui
-                                    .small_button("+")
-                                    .on_hover_text(language.add_to_recipe())
-                                    .clicked()
-                                {
-                                    operation_to_add = Some(op.id.clone());
-                                }
-                            });
-                        }
-                    });
-                    if let Some(operation_id) = operation_to_add {
-                        self.add_operation_to_recipe(&operation_id);
-                    }
-                } else {
-                    ui.colored_label(egui::Color32::RED, language.registry_load_failed());
-                }
+                });
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(360.0);
-                    ui.horizontal(|ui| {
-                        ui.heading(language.recipe_heading());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(language.steps_count(self.recipe.len()));
-                        });
-                    });
-
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button(language.run_recipe()).clicked() {
-                            self.run_recipe();
-                        }
-                        if let Some(operation_id) = self.selected_operation.clone()
-                            && ui.button(language.add_selected()).clicked()
-                        {
-                            self.add_operation_to_recipe(&operation_id);
-                        }
-                        if ui.button(language.clear_recipe()).clicked() {
-                            self.recipe.clear();
-                            self.trace.clear();
-                            self.last_status = self.language.recipe_cleared().to_string();
+                if self.show_recipe {
+                    ui.vertical(|ui| {
+                        ui.set_width(370.0);
+                        self.render_recipe_panel(ui);
+                        if self.show_details {
+                            ui.add_space(8.0);
+                            self.render_selected_details(ui, selected_spec.as_ref());
                         }
                     });
-
-                    let mut move_step = None;
-                    let mut remove_step = None;
-                    let mut duplicate_step = None;
-                    let drop_frame = egui::Frame::group(ui.style())
-                        .inner_margin(egui::Margin::same(8))
-                        .fill(egui::Color32::from_rgb(13, 16, 20));
-                    let (_inner, dropped_operation) =
-                        ui.dnd_drop_zone::<OperationDragPayload, _>(drop_frame, |ui| {
-                            ui.set_min_height(300.0);
-                            if self.recipe.is_empty() {
-                                ui.vertical_centered(|ui| {
-                                    ui.add_space(110.0);
-                                    ui.label(
-                                        egui::RichText::new(language.drop_tools())
-                                            .color(egui::Color32::from_rgb(120, 136, 154)),
-                                    );
-                                });
-                            } else {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    for (index, step) in self.recipe.iter_mut().enumerate() {
-                                        let spec = self
-                                            .registry
-                                            .as_ref()
-                                            .and_then(|registry| registry.find(&step.operation_id));
-                                        let name = spec
-                                            .map(|spec| language.operation_name(spec))
-                                            .unwrap_or(step.operation_id.as_str());
-                                        let detail = spec
-                                            .map(|spec| {
-                                                format!(
-                                                    "{} · {} · {}",
-                                                    spec.id, spec.priority, spec.safety
-                                                )
-                                            })
-                                            .unwrap_or_else(|| step.operation_id.clone());
-
-                                        ui.horizontal(|ui| {
-                                            ui.checkbox(&mut step.enabled, "");
-                                            ui.label(
-                                                egui::RichText::new(format!("{}.", index + 1))
-                                                    .color(egui::Color32::from_rgb(130, 145, 160)),
-                                            );
-                                            ui.vertical(|ui| {
-                                                ui.label(egui::RichText::new(name).strong());
-                                                ui.label(
-                                                    egui::RichText::new(detail).small().color(
-                                                        egui::Color32::from_rgb(145, 158, 174),
-                                                    ),
-                                                );
-                                                if !step.output_preview.is_empty() {
-                                                    ui.label(
-                                                        egui::RichText::new(&step.output_preview)
-                                                            .small()
-                                                            .monospace()
-                                                            .color(egui::Color32::from_rgb(
-                                                                178, 188, 198,
-                                                            )),
-                                                    );
-                                                }
-                                            });
-                                            ui.with_layout(
-                                                egui::Layout::right_to_left(egui::Align::Center),
-                                                |ui| {
-                                                    if ui.small_button("×").clicked() {
-                                                        remove_step = Some(index);
-                                                    }
-                                                    if ui.small_button("⧉").clicked() {
-                                                        duplicate_step = Some(index);
-                                                    }
-                                                    if ui.small_button("↓").clicked() {
-                                                        move_step = Some((index, 1));
-                                                    }
-                                                    if ui.small_button("↑").clicked() {
-                                                        move_step = Some((index, -1));
-                                                    }
-                                                    ui.label(
-                                                        egui::RichText::new(&step.last_status)
-                                                            .small()
-                                                            .color(status_color(&step.last_status)),
-                                                    );
-                                                },
-                                            );
-                                        });
-                                        ui.separator();
-                                    }
-                                });
-                            }
-                        });
-
-                    if let Some(payload) = dropped_operation {
-                        self.add_operation_to_recipe(&payload.operation_id);
-                    }
-                    if let Some((index, direction)) = move_step {
-                        self.move_recipe_step(index, direction);
-                    }
-                    if let Some(index) = duplicate_step
-                        && let Some(step) = self.recipe.get(index).cloned()
-                    {
-                        self.recipe.insert(index + 1, step);
-                        self.last_status = self.language.recipe_updated().to_string();
-                    }
-                    if let Some(index) = remove_step {
-                        self.recipe.remove(index);
-                        self.last_status = self.language.recipe_updated().to_string();
-                    }
-
                     ui.separator();
-                    if let Some(spec) = &selected_spec {
-                        ui.label(egui::RichText::new(language.current_tool()).strong());
-                        ui.label(language.operation_name(spec));
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} · {} · {}",
-                                spec.id, spec.backend, spec.safety
-                            ))
-                            .small()
-                            .color(egui::Color32::from_rgb(150, 164, 180)),
-                        );
-                        ui.horizontal(|ui| {
-                            ui.label(format!(
-                                "{}: {}",
-                                language.output_label(),
-                                spec.output.join(" / ")
-                            ));
-                            ui.separator();
-                            ui.label(category_title(&spec.category, language));
-                        });
-                    }
-                });
-
-                ui.separator();
-
+                }
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.heading(language.input_heading());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            for kind in ["file", "bytes", "text"] {
-                                ui.selectable_value(&mut self.input_kind, kind.to_string(), kind);
-                            }
-                        });
-                    });
-
-                    if self.input_kind == "file" {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.file_path)
-                                .hint_text("/path/to/file")
-                                .desired_width(f32::INFINITY),
-                        );
-                    } else {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.input)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_rows(12)
-                                .desired_width(f32::INFINITY),
-                        );
-                    }
-
-                    ui.horizontal(|ui| {
-                        if ui.button(language.run_recipe()).clicked() {
-                            self.run_recipe();
-                        }
-                        if ui.button(language.run_selected()).clicked() {
-                            self.run_selected();
-                        }
-                        if ui.button(language.clear_input()).clicked() {
-                            if self.input_kind == "file" {
-                                self.file_path.clear();
-                            } else {
-                                self.input.clear();
-                            }
-                        }
-                        if ui.button(language.copy_result()).clicked() && !self.output.is_empty() {
-                            ctx.copy_text(self.output.clone());
-                            self.last_status = self.language.copied().to_string();
-                        }
-                    });
-
-                    if !self.trace.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            for item in &self.trace {
-                                ui.label(
-                                    egui::RichText::new(item)
-                                        .small()
-                                        .color(egui::Color32::from_rgb(142, 168, 192)),
-                                );
-                            }
-                        });
-                    }
-
-                    if !self.warnings.is_empty() {
-                        ui.separator();
-                        for warning in &self.warnings {
-                            ui.colored_label(egui::Color32::YELLOW, warning);
-                        }
-                    }
-
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.heading(language.result_heading());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(format!("{} bytes", self.output.len()));
-                        });
-                    });
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.output)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_rows(18)
-                            .desired_width(f32::INFINITY),
-                    );
+                    ui.set_width(ui.available_width().max(360.0));
+                    self.render_io_panel(ui, ctx);
                 });
             });
         });
+    }
+
+    fn render_category_nav(
+        &mut self,
+        ui: &mut egui::Ui,
+        categories: &[CategoryGroup],
+        category_counts: &[usize],
+    ) {
+        section_heading(ui, self.theme, self.language.categories_heading(), None);
+        ui.add_space(4.0);
+        if self.registry.is_none() {
+            let tokens = ui_tokens(self.theme);
+            ui.colored_label(tokens.danger, self.language.registry_load_failed());
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt("operations_category_scroll")
+            .max_height(190.0)
+            .show(ui, |ui| {
+                for (group, count) in categories.iter().zip(category_counts.iter()) {
+                    let selected = self.active_category == group.id;
+                    let response = card_frame(self.theme, selected).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(group.label(self.language)).strong());
+                                ui.label(
+                                    egui::RichText::new(group.hint(self.language))
+                                        .small()
+                                        .color(ui_tokens(self.theme).muted),
+                                );
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    badge(
+                                        ui,
+                                        self.theme,
+                                        count.to_string(),
+                                        ui_tokens(self.theme).accent_soft,
+                                    );
+                                },
+                            );
+                        });
+                    });
+                    if response.response.clicked() {
+                        self.select_category(group.id);
+                    }
+                    ui.add_space(5.0);
+                }
+            });
+    }
+
+    fn render_tool_library(
+        &mut self,
+        ui: &mut egui::Ui,
+        active_group: &CategoryGroup,
+        visible_operations: &[OperationListItem],
+    ) {
+        let tokens = ui_tokens(self.theme);
+        section_heading(
+            ui,
+            self.theme,
+            active_group.label(self.language),
+            Some(&self.language.tools_count(visible_operations.len())),
+        );
+        ui.label(
+            egui::RichText::new(active_group.hint(self.language))
+                .small()
+                .color(tokens.muted),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut self.query)
+                .hint_text(self.language.search_hint())
+                .desired_width(f32::INFINITY),
+        );
+        ui.horizontal(|ui| {
+            if !self.query.is_empty()
+                && soft_button(ui, self.theme, self.language.clear_search()).clicked()
+            {
+                self.query.clear();
+            }
+        });
+        ui.separator();
+
+        if self.registry.is_none() {
+            ui.colored_label(tokens.danger, self.language.registry_load_failed());
+            return;
+        }
+        if visible_operations.is_empty() {
+            empty_state(
+                ui,
+                self.theme,
+                text(self.language, "No matching operations", "没有匹配的工具"),
+                text(
+                    self.language,
+                    "Try another keyword or category.",
+                    "换一个关键词或分类试试。",
+                ),
+            );
+            return;
+        }
+
+        let mut previous_category = String::new();
+        let mut operation_to_add = None;
+        egui::ScrollArea::vertical()
+            .id_salt("operations_tool_library_scroll")
+            .show(ui, |ui| {
+                for op in visible_operations {
+                    if previous_category != op.category {
+                        previous_category = op.category.clone();
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(category_title(&op.category, self.language))
+                                .strong()
+                                .color(tokens.muted),
+                        );
+                    }
+                    let selected = self.selected_operation.as_deref() == Some(&op.id);
+                    let drag_source = ui.dnd_drag_source(
+                        egui::Id::new(("operation-drag", &op.id)),
+                        OperationDragPayload {
+                            operation_id: op.id.clone(),
+                        },
+                        |ui| self.render_operation_card(ui, op, selected),
+                    );
+                    if drag_source.inner.clicked() {
+                        self.selected_operation = Some(op.id.clone());
+                        if !op.input.iter().any(|kind| kind == &self.input_kind) {
+                            self.input_kind = op
+                                .input
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| "text".to_string());
+                        }
+                    }
+                    if drag_source.inner.double_clicked() {
+                        operation_to_add = Some(op.id.clone());
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+        if let Some(operation_id) = operation_to_add {
+            self.add_operation_to_recipe(&operation_id);
+        }
+    }
+
+    fn render_operation_card(
+        &self,
+        ui: &mut egui::Ui,
+        op: &OperationListItem,
+        selected: bool,
+    ) -> egui::Response {
+        let tokens = ui_tokens(self.theme);
+        card_frame(self.theme, selected)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(self.language.operation_item_name(op)).strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new(&op.id)
+                                .small()
+                                .monospace()
+                                .color(tokens.muted),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            badge(
+                                ui,
+                                self.theme,
+                                &op.priority,
+                                priority_fill(self.theme, &op.priority),
+                            );
+                            badge(
+                                ui,
+                                self.theme,
+                                &op.safety,
+                                safety_fill(self.theme, &op.safety),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} -> {}",
+                                    op.input.join("/"),
+                                    op.output.join("/")
+                                ))
+                                .small()
+                                .color(tokens.dim),
+                            );
+                        });
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new("drag")
+                                .small()
+                                .color(ui_tokens(self.theme).dim),
+                        )
+                        .on_hover_text(self.language.add_to_recipe());
+                    });
+                });
+            })
+            .response
+    }
+
+    fn render_recipe_panel(&mut self, ui: &mut egui::Ui) {
+        panel_frame(self.theme).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                section_heading(
+                    ui,
+                    self.theme,
+                    self.language.recipe_heading(),
+                    Some(&self.language.steps_count(self.recipe.len())),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if soft_button(ui, self.theme, self.language.clear_recipe()).clicked() {
+                        self.recipe.clear();
+                        self.trace.clear();
+                        self.last_status = self.language.recipe_cleared().to_string();
+                    }
+                });
+            });
+            ui.horizontal_wrapped(|ui| {
+                if primary_button(ui, self.theme, self.language.run_recipe()).clicked() {
+                    self.run_recipe();
+                }
+                if let Some(operation_id) = self.selected_operation.clone()
+                    && soft_button(ui, self.theme, self.language.add_selected()).clicked()
+                {
+                    self.add_operation_to_recipe(&operation_id);
+                }
+            });
+            ui.add_space(6.0);
+
+            let mut move_step = None;
+            let mut remove_step = None;
+            let mut duplicate_step = None;
+            let drop_frame = egui::Frame::new()
+                .fill(ui_tokens(self.theme).input_bg)
+                .stroke(egui::Stroke::new(1.0, ui_tokens(self.theme).border))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::same(8));
+            let (_inner, dropped_operation) =
+                ui.dnd_drop_zone::<OperationDragPayload, _>(drop_frame, |ui| {
+                    ui.set_min_height(300.0);
+                    if self.recipe.is_empty() {
+                        empty_state(
+                            ui,
+                            self.theme,
+                            self.language.drop_tools(),
+                            text(
+                                self.language,
+                                "Drag tools here or use Add selected.",
+                                "拖入工具，或点击添加选中。",
+                            ),
+                        );
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("operations_recipe_scroll")
+                            .show(ui, |ui| {
+                                for (index, step) in self.recipe.iter_mut().enumerate() {
+                                    let spec = self
+                                        .registry
+                                        .as_ref()
+                                        .and_then(|registry| registry.find(&step.operation_id));
+                                    let name = spec
+                                        .map(|spec| self.language.operation_name(spec))
+                                        .unwrap_or(step.operation_id.as_str());
+                                    let detail = spec
+                                        .map(|spec| {
+                                            format!(
+                                                "{} · {} · {}",
+                                                spec.id, spec.priority, spec.safety
+                                            )
+                                        })
+                                        .unwrap_or_else(|| step.operation_id.clone());
+
+                                    card_frame(self.theme, false).show(ui, |ui| {
+                                        let tokens = ui_tokens(self.theme);
+                                        ui.set_min_width(ui.available_width().max(220.0));
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.checkbox(&mut step.enabled, "");
+                                            ui.label(
+                                                egui::RichText::new(format!("{:02}", index + 1))
+                                                    .monospace()
+                                                    .color(tokens.dim),
+                                            );
+                                            ui.label(egui::RichText::new(name).strong());
+                                            badge(
+                                                ui,
+                                                self.theme,
+                                                &step.last_status,
+                                                status_fill(self.theme, &step.last_status),
+                                            );
+                                        });
+                                        ui.label(
+                                            egui::RichText::new(detail).small().color(tokens.muted),
+                                        );
+                                        if !step.output_preview.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new(&step.output_preview)
+                                                    .small()
+                                                    .monospace()
+                                                    .color(tokens.muted),
+                                            );
+                                        }
+                                        ui.add_space(3.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if ui.small_button("up").clicked() {
+                                                move_step = Some((index, -1));
+                                            }
+                                            if ui.small_button("down").clicked() {
+                                                move_step = Some((index, 1));
+                                            }
+                                            if ui.small_button("copy").clicked() {
+                                                duplicate_step = Some(index);
+                                            }
+                                            if ui.small_button("x").clicked() {
+                                                remove_step = Some(index);
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(5.0);
+                                }
+                            });
+                    }
+                });
+
+            if let Some(payload) = dropped_operation {
+                self.add_operation_to_recipe(&payload.operation_id);
+            }
+            if let Some((index, direction)) = move_step {
+                self.move_recipe_step(index, direction);
+            }
+            if let Some(index) = duplicate_step
+                && let Some(step) = self.recipe.get(index).cloned()
+            {
+                self.recipe.insert(index + 1, step);
+                self.last_status = self.language.recipe_updated().to_string();
+            }
+            if let Some(index) = remove_step {
+                self.recipe.remove(index);
+                self.last_status = self.language.recipe_updated().to_string();
+            }
+        });
+    }
+
+    fn render_selected_details(&self, ui: &mut egui::Ui, selected_spec: Option<&OperationSpec>) {
+        panel_frame(self.theme).show(ui, |ui| {
+            section_heading(ui, self.theme, self.language.current_tool(), None);
+            if let Some(spec) = selected_spec {
+                let tokens = ui_tokens(self.theme);
+                ui.label(egui::RichText::new(self.language.operation_name(spec)).strong());
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {} · {}",
+                        spec.id, spec.backend, spec.safety
+                    ))
+                    .small()
+                    .color(tokens.muted),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    badge(
+                        ui,
+                        self.theme,
+                        &spec.priority,
+                        priority_fill(self.theme, &spec.priority),
+                    );
+                    badge(
+                        ui,
+                        self.theme,
+                        &spec.safety,
+                        safety_fill(self.theme, &spec.safety),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{}: {}",
+                            self.language.output_label(),
+                            spec.output.join(" / ")
+                        ))
+                        .small()
+                        .color(tokens.muted),
+                    );
+                });
+                ui.label(
+                    egui::RichText::new(category_title(&spec.category, self.language))
+                        .small()
+                        .color(tokens.dim),
+                );
+            } else {
+                empty_state(
+                    ui,
+                    self.theme,
+                    self.language.no_operation_selected(),
+                    text(
+                        self.language,
+                        "Select a tool from the library.",
+                        "从工具库选择一个工具。",
+                    ),
+                );
+            }
+        });
+    }
+
+    fn render_io_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        panel_frame(self.theme).show(ui, |ui| {
+            ui.set_width(ui.available_width().max(320.0));
+            ui.horizontal(|ui| {
+                section_heading(ui, self.theme, self.language.input_heading(), None);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for kind in ["file", "bytes", "text"] {
+                        ui.selectable_value(&mut self.input_kind, kind.to_string(), kind);
+                    }
+                });
+            });
+
+            if self.input_kind == "file" {
+                let editor_width = ui.available_width().max(260.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.file_path)
+                        .hint_text("/path/to/file")
+                        .desired_width(editor_width),
+                );
+            } else {
+                let editor_width = ui.available_width().max(260.0);
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.input)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(13)
+                        .desired_width(editor_width),
+                );
+            }
+
+            ui.horizontal_wrapped(|ui| {
+                if primary_button(ui, self.theme, self.language.run_recipe()).clicked() {
+                    self.run_recipe();
+                }
+                if soft_button(ui, self.theme, self.language.run_selected()).clicked() {
+                    self.run_selected();
+                }
+                if soft_button(ui, self.theme, self.language.clear_input()).clicked() {
+                    if self.input_kind == "file" {
+                        self.file_path.clear();
+                    } else {
+                        self.input.clear();
+                    }
+                }
+                if soft_button(ui, self.theme, self.language.copy_result()).clicked()
+                    && !self.output.is_empty()
+                {
+                    ctx.copy_text(self.output.clone());
+                    self.last_status = self.language.copied().to_string();
+                }
+            });
+
+            if !self.trace.is_empty() {
+                ui.collapsing(text(self.language, "Trace", "链路"), |ui| {
+                    for item in &self.trace {
+                        ui.label(
+                            egui::RichText::new(item)
+                                .small()
+                                .color(ui_tokens(self.theme).muted),
+                        );
+                    }
+                });
+            }
+            if !self.warnings.is_empty() {
+                ui.collapsing(text(self.language, "Warnings", "警告"), |ui| {
+                    for warning in &self.warnings {
+                        ui.colored_label(ui_tokens(self.theme).warning, warning);
+                    }
+                });
+            }
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                section_heading(ui, self.theme, self.language.result_heading(), None);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} bytes", self.output.len()))
+                            .color(ui_tokens(self.theme).muted),
+                    );
+                });
+            });
+            let output_width = ui.available_width().max(260.0);
+            ui.add(
+                egui::TextEdit::multiline(&mut self.output)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_rows(18)
+                    .desired_width(output_width),
+            );
+        });
+    }
+}
+
+impl eframe::App for CtfToolsApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        install_style_for(ctx, self.theme);
+        self.handle_global_shortcuts(ctx);
+        let total_tools = self
+            .registry
+            .as_ref()
+            .map(|registry| registry.operations().len())
+            .unwrap_or_default();
+
+        egui::TopBottomPanel::top("top")
+            .exact_height(48.0)
+            .show(ctx, |ui| {
+                ui.add_space(5.0);
+                self.render_top_toolbar(ui, ctx, total_tools);
+            });
+
+        if self.workspace == AppWorkspace::Launcher {
+            self.render_launcher(ctx);
+        } else {
+            self.render_operations_workspace(ctx);
+        }
     }
 }
 
@@ -1214,16 +1704,6 @@ fn preview_text(value: &str) -> String {
         preview.push(character);
     }
     preview
-}
-
-fn status_color(status: &str) -> egui::Color32 {
-    match status {
-        "OK" => egui::Color32::from_rgb(90, 190, 130),
-        "Error" => egui::Color32::from_rgb(230, 105, 105),
-        "Skipped" => egui::Color32::from_rgb(145, 158, 174),
-        "Pending" => egui::Color32::from_rgb(230, 180, 90),
-        _ => egui::Color32::from_rgb(150, 164, 180),
-    }
 }
 
 fn category_groups() -> Vec<CategoryGroup> {

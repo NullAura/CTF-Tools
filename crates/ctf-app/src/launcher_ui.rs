@@ -1,4 +1,7 @@
-use super::{AppTheme, CtfToolsApp, Language, install_style_for};
+use super::{
+    AppTheme, CtfToolsApp, Language, badge, card_frame, install_style_for, panel_frame,
+    section_heading, ui_tokens,
+};
 use ctf_launcher::{
     ALL_ID, Category, Environment, EnvironmentRegistry, EnvironmentType, FAVORITES_ID,
     LauncherSettings, LauncherStore, LauncherTool, RECENT_ID, ToolType, bind_javafx_tools,
@@ -461,7 +464,7 @@ impl Default for EnvEditorState {
 }
 
 impl CtfToolsApp {
-    fn set_app_theme(&mut self, ctx: &egui::Context, theme: AppTheme) {
+    pub(super) fn set_app_theme(&mut self, ctx: &egui::Context, theme: AppTheme) {
         if self.theme == theme {
             return;
         }
@@ -481,45 +484,60 @@ impl CtfToolsApp {
 
         egui::SidePanel::left("launcher_categories")
             .resizable(false)
-            .default_width(220.0)
-            .show(ctx, |ui| self.render_launcher_categories(ui, language));
+            .default_width(230.0)
+            .show(ctx, |ui| {
+                panel_frame(self.theme).show(ui, |ui| {
+                    self.render_launcher_categories(ui, language);
+                });
+            });
 
-        egui::SidePanel::right("launcher_editor")
-            .resizable(true)
-            .default_width(390.0)
-            .show(ctx, |ui| self.render_launcher_editor(ui, ctx, language));
+        if self.show_launcher_editor {
+            egui::SidePanel::right("launcher_editor")
+                .resizable(true)
+                .default_width(410.0)
+                .width_range(330.0..=560.0)
+                .show(ctx, |ui| {
+                    panel_frame(self.theme).show(ui, |ui| {
+                        self.render_launcher_editor(ui, ctx, language);
+                    });
+                });
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.render_launcher_main(ui, ctx, language);
-        });
-
-        egui::TopBottomPanel::bottom("launcher_status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(self.launcher.status.as_str());
-                ui.separator();
-                ui.label(format!(
-                    "{}: {}",
-                    text(language, "Data", "数据目录"),
-                    self.launcher.store.data_dir().display()
-                ));
-                ui.separator();
-                let python = self
-                    .launcher
-                    .environments
-                    .default_python()
-                    .map(|env| env.name.as_str())
-                    .unwrap_or_else(|| text(language, "not set", "未设置"));
-                let java = self
-                    .launcher
-                    .environments
-                    .default_java()
-                    .map(|env| env.name.as_str())
-                    .unwrap_or_else(|| text(language, "not set", "未设置"));
-                ui.label(format!("Python: {python}"));
-                ui.separator();
-                ui.label(format!("Java: {java}"));
+            panel_frame(self.theme).show(ui, |ui| {
+                self.render_launcher_main(ui, ctx, language);
             });
         });
+
+        egui::TopBottomPanel::bottom("launcher_status")
+            .exact_height(28.0)
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(self.launcher.status.as_str());
+                    ui.separator();
+                    ui.label(format!(
+                        "{}: {}",
+                        text(language, "Data", "数据目录"),
+                        self.launcher.store.data_dir().display()
+                    ));
+                    ui.separator();
+                    let python = self
+                        .launcher
+                        .environments
+                        .default_python()
+                        .map(|env| env.name.as_str())
+                        .unwrap_or_else(|| text(language, "not set", "未设置"));
+                    let java = self
+                        .launcher
+                        .environments
+                        .default_java()
+                        .map(|env| env.name.as_str())
+                        .unwrap_or_else(|| text(language, "not set", "未设置"));
+                    ui.label(format!("Python: {python}"));
+                    ui.separator();
+                    ui.label(format!("Java: {java}"));
+                });
+            });
     }
 
     fn handle_launcher_shortcuts(&mut self, ctx: &egui::Context) {
@@ -625,8 +643,13 @@ impl CtfToolsApp {
     }
 
     fn render_launcher_categories(&mut self, ui: &mut egui::Ui, language: Language) {
-        ui.heading(text(language, "Launcher", "工具启动器"));
-        ui.add_space(6.0);
+        section_heading(
+            ui,
+            self.theme,
+            text(language, "Launcher", "工具启动器"),
+            None,
+        );
+        ui.add_space(8.0);
         let counts = category_counts(&self.launcher.tools);
         let virtual_categories = [
             (ALL_ID, text(language, "All Tools", "全部工具")),
@@ -642,7 +665,7 @@ impl CtfToolsApp {
             ui.label(
                 egui::RichText::new(text(language, "No custom categories", "暂无自定义分类"))
                     .small()
-                    .color(egui::Color32::from_rgb(145, 158, 174)),
+                    .color(ui_tokens(self.theme).dim),
             );
         } else {
             for category in self.launcher.categories.clone() {
@@ -661,28 +684,59 @@ impl CtfToolsApp {
         language: Language,
     ) {
         let selected = self.launcher.active_category == category_id;
-        let response = ui.selectable_label(
-            selected,
-            format!("{label}\n{}", self.language.tools_count(count)),
-        );
-        if response.clicked() {
+        let response = card_frame(self.theme, selected).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(label).strong());
+                    ui.label(
+                        egui::RichText::new(self.language.tools_count(count))
+                            .small()
+                            .color(ui_tokens(self.theme).muted),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    badge(
+                        ui,
+                        self.theme,
+                        count.to_string(),
+                        ui_tokens(self.theme).accent_soft,
+                    );
+                });
+            });
+        });
+        if response.response.clicked() {
             self.launcher.active_category = category_id.to_string();
             if let Some(tool) = self.launcher.visible_tools().first() {
                 self.launcher.select_tool(&tool.id);
             }
         }
-        response.on_hover_text(match category_id {
+        response.response.on_hover_text(match category_id {
             ALL_ID => text(language, "Show every launcher entry", "显示全部启动器工具"),
             FAVORITES_ID => text(language, "Pinned tools", "收藏工具"),
             RECENT_ID => text(language, "Recently launched tools", "最近启动工具"),
             _ => text(language, "Custom category", "自定义分类"),
         });
+        ui.add_space(5.0);
     }
 
     fn render_launcher_main(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, language: Language) {
         ui.horizontal(|ui| {
-            ui.heading(text(language, "Local Tool Launcher", "本地工具启动器"));
+            section_heading(
+                ui,
+                self.theme,
+                text(language, "Local Tool Launcher", "本地工具启动器"),
+                Some(text(
+                    language,
+                    "Python, Java, shell, GUI apps, and URLs",
+                    "Python、Java、Shell、GUI 应用和 URL",
+                )),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !self.show_launcher_editor
+                    && ui.button(text(language, "Inspector", "检查器")).clicked()
+                {
+                    self.show_launcher_editor = true;
+                }
                 if ui
                     .button(text(language, "Rescan Envs", "重新扫描环境"))
                     .clicked()
@@ -694,11 +748,6 @@ impl CtfToolsApp {
                 }
             });
         });
-        ui.label(text(
-            language,
-            "asuTools-compatible local launcher for Python, Java, shell, GUI apps, and URLs.",
-            "兼容 asuTools 数据结构的本地启动器，支持 Python、Java、Shell、GUI 应用和 URL。",
-        ));
         ui.add_space(4.0);
         ui.add(
             egui::TextEdit::singleline(&mut self.launcher.query)
@@ -748,119 +797,136 @@ impl CtfToolsApp {
         ui.separator();
         if visible.is_empty() {
             ui.vertical_centered(|ui| {
-                ui.add_space(140.0);
+                ui.add_space(120.0);
+                ui.label(
+                    egui::RichText::new(text(language, "No launcher tools yet", "暂无启动器工具"))
+                        .strong()
+                        .color(ui_tokens(self.theme).muted),
+                );
                 ui.label(
                     egui::RichText::new(text(
                         language,
-                        "No launcher tools yet. Add one from the editor.",
-                        "暂无启动器工具，请从右侧编辑区新增。",
+                        "Add one from the inspector or import asuTools data.",
+                        "从检查器新增，或导入 asuTools 数据。",
                     ))
-                    .color(egui::Color32::from_rgb(145, 158, 174)),
+                    .small()
+                    .color(ui_tokens(self.theme).dim),
                 );
             });
             return;
         }
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let card_width = (ui.available_width() - 12.0).max(260.0);
-            for tool in visible {
-                let selected = self.launcher.selected_tool.as_deref() == Some(tool.id.as_str());
-                let response = egui::Frame::group(ui.style())
-                    .inner_margin(egui::Margin::same(10))
-                    .fill(launcher_card_fill(selected, self.theme))
-                    .show(ui, |ui| {
-                        ui.set_width(card_width);
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                let favorite = if tool.favorite { " ★" } else { "" };
-                                ui.label(
-                                    egui::RichText::new(format!("{}{}", tool.name, favorite))
-                                        .strong(),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} · {} · {}",
-                                        tool.tool_type.as_str(),
-                                        if tool.category.is_empty() {
-                                            text(language, "uncategorized", "未分类")
-                                        } else {
-                                            tool.category.as_str()
-                                        },
-                                        tool.path
-                                    ))
-                                    .small()
-                                    .color(egui::Color32::from_rgb(145, 158, 174)),
-                                );
-                                if !tool.description.is_empty() || !tool.tags.is_empty() {
+        egui::ScrollArea::vertical()
+            .id_salt("launcher_tools_scroll")
+            .show(ui, |ui| {
+                let card_width = (ui.available_width() - 12.0).max(260.0);
+                for tool in visible {
+                    let selected = self.launcher.selected_tool.as_deref() == Some(tool.id.as_str());
+                    let response = card_frame(self.theme, selected)
+                        .show(ui, |ui| {
+                            ui.set_width(card_width);
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    let favorite = if tool.favorite { " ★" } else { "" };
                                     ui.label(
-                                        egui::RichText::new(format!(
-                                            "{} {}",
-                                            tool.description,
-                                            tool.tags.join(", ")
-                                        ))
-                                        .small()
-                                        .color(egui::Color32::from_rgb(170, 180, 190)),
+                                        egui::RichText::new(format!("{}{}", tool.name, favorite))
+                                            .strong(),
                                     );
-                                }
-                            });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.small_button(text(language, "Launch", "启动")).clicked()
-                                    {
-                                        self.launcher.select_tool(&tool.id);
-                                        self.launcher.launch_selected(language);
+                                    ui.horizontal_wrapped(|ui| {
+                                        badge(
+                                            ui,
+                                            self.theme,
+                                            tool.tool_type.as_str(),
+                                            launcher_type_fill(self.theme, tool.tool_type),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(if tool.category.is_empty() {
+                                                text(language, "uncategorized", "未分类")
+                                            } else {
+                                                tool.category.as_str()
+                                            })
+                                            .small()
+                                            .color(ui_tokens(self.theme).muted),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(&tool.path)
+                                                .small()
+                                                .monospace()
+                                                .color(ui_tokens(self.theme).dim),
+                                        );
+                                    });
+                                    if !tool.description.is_empty() || !tool.tags.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} {}",
+                                                tool.description,
+                                                tool.tags.join(", ")
+                                            ))
+                                            .small()
+                                            .color(ui_tokens(self.theme).muted),
+                                        );
                                     }
-                                },
-                            );
-                        });
-                    })
-                    .response;
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .small_button(text(language, "Launch", "启动"))
+                                            .clicked()
+                                        {
+                                            self.launcher.select_tool(&tool.id);
+                                            self.launcher.launch_selected(language);
+                                        }
+                                    },
+                                );
+                            });
+                        })
+                        .response;
 
-                if response.clicked() {
-                    self.launcher.select_tool(&tool.id);
-                }
-                if response.double_clicked() {
-                    self.launcher.select_tool(&tool.id);
-                    self.launcher.launch_selected(language);
-                }
-                response.context_menu(|ui| {
-                    if ui.button(text(language, "Launch", "启动")).clicked() {
+                    if response.clicked() {
+                        self.launcher.select_tool(&tool.id);
+                    }
+                    if response.double_clicked() {
                         self.launcher.select_tool(&tool.id);
                         self.launcher.launch_selected(language);
-                        ui.close();
                     }
-                    if ui
-                        .button(if tool.favorite {
-                            text(language, "Unfavorite", "取消收藏")
-                        } else {
-                            text(language, "Favorite", "收藏")
-                        })
-                        .clicked()
-                    {
-                        self.launcher.select_tool(&tool.id);
-                        self.launcher.toggle_favorite(language);
-                        ui.close();
-                    }
-                    if ui.button(text(language, "Edit", "编辑")).clicked() {
-                        self.launcher.select_tool(&tool.id);
-                        ui.close();
-                    }
-                    if ui.button(text(language, "Copy Path", "复制路径")).clicked() {
-                        self.launcher.select_tool(&tool.id);
-                        self.launcher.copy_selected_path(ctx, language);
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button(text(language, "Remove", "移除")).clicked() {
-                        self.launcher.select_tool(&tool.id);
-                        self.launcher.delete_selected(language);
-                        ui.close();
-                    }
-                });
-                ui.add_space(6.0);
-            }
-        });
+                    response.context_menu(|ui| {
+                        if ui.button(text(language, "Launch", "启动")).clicked() {
+                            self.launcher.select_tool(&tool.id);
+                            self.launcher.launch_selected(language);
+                            ui.close();
+                        }
+                        if ui
+                            .button(if tool.favorite {
+                                text(language, "Unfavorite", "取消收藏")
+                            } else {
+                                text(language, "Favorite", "收藏")
+                            })
+                            .clicked()
+                        {
+                            self.launcher.select_tool(&tool.id);
+                            self.launcher.toggle_favorite(language);
+                            ui.close();
+                        }
+                        if ui.button(text(language, "Edit", "编辑")).clicked() {
+                            self.launcher.select_tool(&tool.id);
+                            ui.close();
+                        }
+                        if ui.button(text(language, "Copy Path", "复制路径")).clicked() {
+                            self.launcher.select_tool(&tool.id);
+                            self.launcher.copy_selected_path(ctx, language);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button(text(language, "Remove", "移除")).clicked() {
+                            self.launcher.select_tool(&tool.id);
+                            self.launcher.delete_selected(language);
+                            ui.close();
+                        }
+                    });
+                    ui.add_space(6.0);
+                }
+            });
     }
 
     fn render_launcher_editor(
@@ -869,7 +935,12 @@ impl CtfToolsApp {
         ctx: &egui::Context,
         language: Language,
     ) {
-        ui.heading(text(language, "Tool Editor", "工具编辑"));
+        section_heading(
+            ui,
+            self.theme,
+            text(language, "Inspector", "检查器"),
+            Some(text(language, "Edit launcher metadata", "编辑启动器元数据")),
+        );
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui.button(text(language, "New", "新增")).clicked() {
@@ -886,79 +957,89 @@ impl CtfToolsApp {
         });
         ui.separator();
 
-        egui::Grid::new("launcher_tool_editor")
-            .num_columns(2)
-            .spacing([10.0, 8.0])
+        egui::CollapsingHeader::new(text(language, "Basic", "基础"))
+            .default_open(true)
             .show(ui, |ui| {
-                ui.label(text(language, "Name", "名称"));
-                ui.text_edit_singleline(&mut self.launcher.editor.name);
-                ui.end_row();
+                egui::Grid::new("launcher_tool_editor")
+                    .num_columns(2)
+                    .spacing([10.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label(text(language, "Name", "名称"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.name);
+                        ui.end_row();
 
-                ui.label(text(language, "Type", "类型"));
-                egui::ComboBox::from_id_salt("launcher_tool_type")
-                    .selected_text(self.launcher.editor.tool_type.as_str())
-                    .show_ui(ui, |ui| {
-                        for tool_type in [
-                            ToolType::Python,
-                            ToolType::Java,
-                            ToolType::Shell,
-                            ToolType::Gui,
-                            ToolType::Url,
-                        ] {
-                            ui.selectable_value(
-                                &mut self.launcher.editor.tool_type,
-                                tool_type,
-                                tool_type.as_str(),
-                            );
-                        }
+                        ui.label(text(language, "Type", "类型"));
+                        egui::ComboBox::from_id_salt("launcher_tool_type")
+                            .selected_text(self.launcher.editor.tool_type.as_str())
+                            .show_ui(ui, |ui| {
+                                for tool_type in [
+                                    ToolType::Python,
+                                    ToolType::Java,
+                                    ToolType::Shell,
+                                    ToolType::Gui,
+                                    ToolType::Url,
+                                ] {
+                                    ui.selectable_value(
+                                        &mut self.launcher.editor.tool_type,
+                                        tool_type,
+                                        tool_type.as_str(),
+                                    );
+                                }
+                            });
+                        ui.end_row();
+
+                        ui.label(text(language, "Path / URL", "路径 / URL"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.path);
+                        ui.end_row();
+
+                        ui.label(text(language, "Args", "参数"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.args);
+                        ui.end_row();
+
+                        ui.label(text(language, "Category", "分类"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.category);
+                        ui.end_row();
+
+                        ui.label(text(language, "Environment", "环境"));
+                        self.render_env_combo(ui);
+                        ui.end_row();
+
+                        ui.label(text(language, "Tags", "标签"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.tags);
+                        ui.end_row();
+
+                        ui.label(text(language, "Description", "描述"));
+                        ui.text_edit_singleline(&mut self.launcher.editor.description);
+                        ui.end_row();
                     });
-                ui.end_row();
-
-                ui.label(text(language, "Path / URL", "路径 / URL"));
-                ui.text_edit_singleline(&mut self.launcher.editor.path);
-                ui.end_row();
-
-                ui.label(text(language, "Args", "参数"));
-                ui.text_edit_singleline(&mut self.launcher.editor.args);
-                ui.end_row();
-
-                ui.label(text(language, "Category", "分类"));
-                ui.text_edit_singleline(&mut self.launcher.editor.category);
-                ui.end_row();
-
-                ui.label(text(language, "Environment", "环境"));
-                self.render_env_combo(ui);
-                ui.end_row();
-
-                ui.label(text(language, "Tags", "标签"));
-                ui.text_edit_singleline(&mut self.launcher.editor.tags);
-                ui.end_row();
-
-                ui.label(text(language, "Description", "描述"));
-                ui.text_edit_singleline(&mut self.launcher.editor.description);
-                ui.end_row();
+                ui.checkbox(
+                    &mut self.launcher.editor.favorite,
+                    text(language, "Favorite", "收藏"),
+                );
             });
-        ui.checkbox(
-            &mut self.launcher.editor.favorite,
-            text(language, "Favorite", "收藏"),
-        );
 
         ui.separator();
-        ui.collapsing(text(language, "Environments", "环境"), |ui| {
-            self.render_environment_settings(ui, language);
-        });
-        ui.collapsing(text(language, "General", "通用"), |ui| {
-            self.render_launcher_general_settings(ui, ctx, language);
-        });
-        ui.collapsing(text(language, "About asuTools Port", "关于 asuTools 搬运"), |ui| {
-            ui.label(text(
-                language,
-                "This launcher keeps the asuTools JSON schema: tools.json, categories.json, environments.json, settings.json.",
-                "此启动器保持 asuTools JSON 数据结构：tools.json、categories.json、environments.json、settings.json。",
-            ));
-            ui.label("Source: https://github.com/lsdogXG/asutools · MIT");
-            ui.label(format!("Theme setting: {}", self.launcher.settings.theme));
-        });
+        egui::CollapsingHeader::new(text(language, "Environment", "环境"))
+            .default_open(false)
+            .show(ui, |ui| {
+                self.render_environment_settings(ui, language);
+            });
+        egui::CollapsingHeader::new(text(language, "Settings", "设置"))
+            .default_open(true)
+            .show(ui, |ui| {
+                self.render_launcher_general_settings(ui, ctx, language);
+            });
+        egui::CollapsingHeader::new(text(language, "About", "关于"))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(text(
+                    language,
+                    "This launcher keeps the asuTools JSON schema: tools.json, categories.json, environments.json, settings.json.",
+                    "此启动器保持 asuTools JSON 数据结构：tools.json、categories.json、environments.json、settings.json。",
+                ));
+                ui.label("Source: https://github.com/lsdogXG/asutools · MIT");
+                ui.label(format!("Theme setting: {}", self.launcher.settings.theme));
+            });
     }
 
     fn render_launcher_general_settings(
@@ -967,6 +1048,16 @@ impl CtfToolsApp {
         ctx: &egui::Context,
         language: Language,
     ) {
+        section_heading(
+            ui,
+            self.theme,
+            text(language, "Appearance", "外观"),
+            Some(text(
+                language,
+                "Saved in launcher settings",
+                "保存到启动器设置",
+            )),
+        );
         ui.horizontal(|ui| {
             ui.label(text(language, "Theme", "主题"));
             let mut selected = self.theme;
@@ -981,6 +1072,17 @@ impl CtfToolsApp {
                 self.set_app_theme(ctx, selected);
             }
         });
+        ui.separator();
+        section_heading(
+            ui,
+            self.theme,
+            text(language, "Data and compatibility", "数据与兼容"),
+            Some(text(
+                language,
+                "asuTools migration helpers",
+                "asuTools 迁移辅助",
+            )),
+        );
         ui.horizontal_wrapped(|ui| {
             if ui
                 .button(text(language, "Import asuTools Data", "导入 asuTools 数据"))
@@ -1083,6 +1185,7 @@ impl CtfToolsApp {
         });
         ui.add_space(4.0);
         egui::ScrollArea::vertical()
+            .id_salt("launcher_env_scroll")
             .max_height(190.0)
             .show(ui, |ui| {
                 for env in self.launcher.environments.environments.clone() {
@@ -1179,12 +1282,14 @@ fn split_tags(tags: &str) -> Vec<String> {
         .collect()
 }
 
-fn launcher_card_fill(selected: bool, theme: AppTheme) -> egui::Color32 {
-    match (selected, theme) {
-        (true, AppTheme::Dark) => egui::Color32::from_rgb(32, 76, 108),
-        (false, AppTheme::Dark) => egui::Color32::from_rgb(20, 24, 30),
-        (true, AppTheme::Light) => egui::Color32::from_rgb(202, 228, 244),
-        (false, AppTheme::Light) => egui::Color32::from_rgb(248, 250, 252),
+fn launcher_type_fill(theme: AppTheme, tool_type: ToolType) -> egui::Color32 {
+    let tokens = ui_tokens(theme);
+    match tool_type {
+        ToolType::Python => tokens.accent,
+        ToolType::Java => tokens.warning,
+        ToolType::Shell => tokens.panel_alt,
+        ToolType::Gui => tokens.success,
+        ToolType::Url => tokens.accent_soft,
     }
 }
 
