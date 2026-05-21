@@ -1,6 +1,6 @@
 use super::{
-    AppTheme, CtfToolsApp, Language, badge, card_frame, install_style_for, panel_frame,
-    section_heading, ui_tokens,
+    AppTheme, COMPACT_LAUNCHER_WIDTH, CtfToolsApp, Language, badge, card_frame, install_style_for,
+    panel_frame, section_heading, ui_tokens,
 };
 use ctf_launcher::{
     ALL_ID, Category, Environment, EnvironmentRegistry, EnvironmentType, FAVORITES_ID,
@@ -481,17 +481,19 @@ impl CtfToolsApp {
     pub(super) fn render_launcher(&mut self, ctx: &egui::Context) {
         let language = self.language;
         self.handle_launcher_shortcuts(ctx);
+        let compact = ctx.available_rect().width() < COMPACT_LAUNCHER_WIDTH;
 
         egui::SidePanel::left("launcher_categories")
-            .resizable(false)
+            .resizable(true)
             .default_width(230.0)
+            .width_range(180.0..=280.0)
             .show(ctx, |ui| {
                 panel_frame(self.theme).show(ui, |ui| {
                     self.render_launcher_categories(ui, language);
                 });
             });
 
-        if self.show_launcher_editor {
+        if self.show_launcher_editor && !compact {
             egui::SidePanel::right("launcher_editor")
                 .resizable(true)
                 .default_width(410.0)
@@ -505,39 +507,46 @@ impl CtfToolsApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             panel_frame(self.theme).show(ui, |ui| {
-                self.render_launcher_main(ui, ctx, language);
+                egui::ScrollArea::both()
+                    .id_salt("launcher_workspace_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_launcher_main(ui, ctx, language);
+                        if compact && self.show_launcher_editor {
+                            ui.separator();
+                            self.render_launcher_editor(ui, ctx, language);
+                        }
+                    });
             });
         });
 
-        egui::TopBottomPanel::bottom("launcher_status")
-            .exact_height(28.0)
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(self.launcher.status.as_str());
-                    ui.separator();
-                    ui.label(format!(
-                        "{}: {}",
-                        text(language, "Data", "数据目录"),
-                        self.launcher.store.data_dir().display()
-                    ));
-                    ui.separator();
-                    let python = self
-                        .launcher
-                        .environments
-                        .default_python()
-                        .map(|env| env.name.as_str())
-                        .unwrap_or_else(|| text(language, "not set", "未设置"));
-                    let java = self
-                        .launcher
-                        .environments
-                        .default_java()
-                        .map(|env| env.name.as_str())
-                        .unwrap_or_else(|| text(language, "not set", "未设置"));
-                    ui.label(format!("Python: {python}"));
-                    ui.separator();
-                    ui.label(format!("Java: {java}"));
-                });
+        egui::TopBottomPanel::bottom("launcher_status").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(self.launcher.status.as_str());
+                ui.separator();
+                ui.label(format!(
+                    "{}: {}",
+                    text(language, "Data", "数据目录"),
+                    self.launcher.store.data_dir().display()
+                ));
+                ui.separator();
+                let python = self
+                    .launcher
+                    .environments
+                    .default_python()
+                    .map(|env| env.name.as_str())
+                    .unwrap_or_else(|| text(language, "not set", "未设置"));
+                let java = self
+                    .launcher
+                    .environments
+                    .default_java()
+                    .map(|env| env.name.as_str())
+                    .unwrap_or_else(|| text(language, "not set", "未设置"));
+                ui.label(format!("Python: {python}"));
+                ui.separator();
+                ui.label(format!("Java: {java}"));
             });
+        });
     }
 
     fn handle_launcher_shortcuts(&mut self, ctx: &egui::Context) {
@@ -725,7 +734,7 @@ impl CtfToolsApp {
     }
 
     fn render_launcher_main(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, language: Language) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             section_heading(
                 ui,
                 self.theme,
@@ -736,22 +745,20 @@ impl CtfToolsApp {
                     "Python、Java、Shell、GUI 应用和 URL",
                 )),
             );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !self.show_launcher_editor
-                    && ui.button(text(language, "Inspector", "检查器")).clicked()
-                {
-                    self.show_launcher_editor = true;
-                }
-                if ui
-                    .button(text(language, "Rescan Envs", "重新扫描环境"))
-                    .clicked()
-                {
-                    self.launcher.rescan_environments(language);
-                }
-                if ui.button(text(language, "New", "新增")).clicked() {
-                    self.launcher.start_new_tool();
-                }
-            });
+            if !self.show_launcher_editor
+                && ui.button(text(language, "Inspector", "检查器")).clicked()
+            {
+                self.show_launcher_editor = true;
+            }
+            if ui
+                .button(text(language, "Rescan Envs", "重新扫描环境"))
+                .clicked()
+            {
+                self.launcher.rescan_environments(language);
+            }
+            if ui.button(text(language, "New", "新增")).clicked() {
+                self.launcher.start_new_tool();
+            }
         });
         ui.add_space(4.0);
         ui.add(
@@ -830,7 +837,7 @@ impl CtfToolsApp {
                     let response = card_frame(self.theme, selected)
                         .show(ui, |ui| {
                             ui.set_width(card_width);
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 ui.vertical(|ui| {
                                     let favorite = if tool.favorite { " ★" } else { "" };
                                     ui.label(
@@ -872,18 +879,10 @@ impl CtfToolsApp {
                                         );
                                     }
                                 });
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .small_button(text(language, "Launch", "启动"))
-                                            .clicked()
-                                        {
-                                            self.launcher.select_tool(&tool.id);
-                                            self.launcher.launch_selected(language);
-                                        }
-                                    },
-                                );
+                                if ui.small_button(text(language, "Launch", "启动")).clicked() {
+                                    self.launcher.select_tool(&tool.id);
+                                    self.launcher.launch_selected(language);
+                                }
                             });
                         })
                         .response
@@ -949,7 +948,7 @@ impl CtfToolsApp {
             Some(text(language, "Edit launcher metadata", "编辑启动器元数据")),
         );
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button(text(language, "New", "新增")).clicked() {
                 self.launcher.start_new_tool();
             }
@@ -1065,7 +1064,7 @@ impl CtfToolsApp {
                 "保存到启动器设置",
             )),
         );
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(text(language, "Theme", "主题"));
             let mut selected = self.theme;
             egui::ComboBox::from_id_salt("launcher_theme")

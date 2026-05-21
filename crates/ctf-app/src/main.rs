@@ -1,12 +1,18 @@
 use ctf_core::{OperationInput, OperationRegistry, OperationRequest, OperationSpec, TaskLimits};
 use eframe::egui;
+use std::path::{Path, PathBuf};
 
 mod launcher_ui;
 
+const MIN_VIEWPORT_WIDTH: f32 = 760.0;
+const MIN_VIEWPORT_HEIGHT: f32 = 560.0;
+const COMPACT_OPERATIONS_WIDTH: f32 = 760.0;
+const COMPACT_LAUNCHER_WIDTH: f32 = 980.0;
 const DEFAULT_OPERATION_CATEGORY_HEIGHT: f32 = 220.0;
 const MIN_OPERATION_CATEGORY_HEIGHT: f32 = 96.0;
 const MIN_OPERATION_TOOL_LIBRARY_HEIGHT: f32 = 180.0;
 const OPERATIONS_LIBRARY_SPLITTER_HEIGHT: f32 = 18.0;
+const TEXT_FILE_DROP_LIMIT_BYTES: u64 = 512 * 1024;
 
 #[derive(Debug, Clone)]
 struct OperationDragPayload {
@@ -306,6 +312,38 @@ impl Language {
         }
     }
 
+    fn file_drop_hint(self) -> &'static str {
+        match self {
+            Self::English => {
+                "Drop a file here. Text files load as text; binary files use file input."
+            }
+            Self::Chinese => "拖入文件。文本文件自动读入文本，二进制文件自动使用文件输入。",
+        }
+    }
+
+    fn loaded_text_file(self, file_name: &str, byte_count: usize) -> String {
+        match self {
+            Self::English => format!("Loaded text file: {file_name} ({byte_count} bytes)"),
+            Self::Chinese => format!("已载入文本文件：{file_name}（{byte_count} bytes）"),
+        }
+    }
+
+    fn using_file_input(self, file_name: &str) -> String {
+        match self {
+            Self::English => format!("Using file input: {file_name}"),
+            Self::Chinese => format!("已使用文件输入：{file_name}"),
+        }
+    }
+
+    fn unsupported_dropped_file(self, file_name: &str) -> String {
+        match self {
+            Self::English => {
+                format!("Dropped file is not accepted by the current tool: {file_name}")
+            }
+            Self::Chinese => format!("当前工具不接受这个拖入文件：{file_name}"),
+        }
+    }
+
     fn no_operation_selected(self) -> &'static str {
         match self {
             Self::English => "No operation selected",
@@ -424,7 +462,9 @@ impl RecipeStep {
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 820.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 820.0])
+            .with_min_inner_size([MIN_VIEWPORT_WIDTH, MIN_VIEWPORT_HEIGHT]),
         ..Default::default()
     };
 
@@ -597,6 +637,44 @@ fn panel_toggle(ui: &mut egui::Ui, visible: &mut bool, label: &str) {
     if ui.small_button(format!("{icon} {label}")).clicked() {
         *visible = !*visible;
     }
+}
+
+fn operation_accepts(input_kinds: &[String], kind: &str) -> bool {
+    input_kinds.iter().any(|input_kind| input_kind == kind)
+}
+
+fn dropped_file_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+fn read_dropped_text_file(path: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if metadata.len() > TEXT_FILE_DROP_LIMIT_BYTES {
+        return None;
+    }
+
+    let bytes = std::fs::read(path).ok()?;
+    if !looks_like_text_bytes(&bytes) {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+fn looks_like_text_bytes(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return true;
+    }
+    if bytes.contains(&0) {
+        return false;
+    }
+    let control_count = bytes
+        .iter()
+        .filter(|byte| byte.is_ascii_control() && !matches!(byte, b'\n' | b'\r' | b'\t'))
+        .count();
+    control_count * 100 <= bytes.len()
 }
 
 fn split_category_height_bounds(available_height: f32) -> (f32, f32) {
@@ -1005,6 +1083,76 @@ impl CtfToolsApp {
         }
     }
 
+    fn active_flow_input_kinds(&self, selected_spec: Option<&OperationSpec>) -> Vec<String> {
+        if let Some(step) = self.recipe.iter().find(|step| step.enabled)
+            && let Some(spec) = self
+                .registry
+                .as_ref()
+                .and_then(|registry| registry.find(&step.operation_id))
+        {
+            return spec.input.clone();
+        }
+
+        selected_spec
+            .map(|spec| spec.input.clone())
+            .unwrap_or_else(|| vec!["text".to_string(), "file".to_string()])
+    }
+
+    fn handle_input_file_drops(&mut self, ctx: &egui::Context, accepted_input_kinds: &[String]) {
+        let dropped_paths = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .filter_map(|file| file.path.clone())
+                .collect::<Vec<_>>()
+        });
+        for path in dropped_paths {
+            self.apply_dropped_input_file(path, accepted_input_kinds);
+        }
+    }
+
+    fn apply_dropped_input_file(&mut self, path: PathBuf, accepted_input_kinds: &[String]) {
+        let file_name = dropped_file_display_name(&path);
+        let text_content = if operation_accepts(accepted_input_kinds, "text")
+            || operation_accepts(accepted_input_kinds, "bytes")
+        {
+            read_dropped_text_file(&path)
+        } else {
+            None
+        };
+
+        if operation_accepts(accepted_input_kinds, "text")
+            && let Some(text_content) = text_content.as_ref()
+        {
+            self.input_kind = "text".to_string();
+            self.input = text_content.clone();
+            self.file_path = path.to_string_lossy().into_owned();
+            self.last_status = self.language.loaded_text_file(&file_name, self.input.len());
+            return;
+        }
+
+        if operation_accepts(accepted_input_kinds, "file") {
+            self.input_kind = "file".to_string();
+            self.file_path = path.to_string_lossy().into_owned();
+            self.last_status = self.language.using_file_input(&file_name);
+            return;
+        }
+
+        if operation_accepts(accepted_input_kinds, "bytes")
+            && let Some(text_content) = text_content
+        {
+            self.input_kind = "bytes".to_string();
+            self.input = text_content;
+            self.file_path = path.to_string_lossy().into_owned();
+            self.last_status = self.language.loaded_text_file(&file_name, self.input.len());
+            return;
+        }
+
+        self.output = self.language.unsupported_dropped_file(&file_name);
+        self.last_status = "Error".to_string();
+    }
+
     fn visible_operations(&self) -> Vec<OperationListItem> {
         let Some(registry) = &self.registry else {
             return Vec::new();
@@ -1035,7 +1183,7 @@ impl CtfToolsApp {
 
     fn render_top_toolbar(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, total_tools: usize) {
         let tokens = ui_tokens(self.theme);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(
                 egui::RichText::new("CTF Tools")
                     .strong()
@@ -1086,43 +1234,40 @@ impl CtfToolsApp {
                 );
             }
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.menu_button(self.language.settings(), |ui| {
-                    ui.label(self.language.language_label());
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.language, Language::English, "English");
-                        ui.selectable_value(&mut self.language, Language::Chinese, "中文");
-                    });
-                    ui.separator();
-                    ui.label(text(self.language, "Theme", "主题"));
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(self.theme == AppTheme::Dark, "Dark")
-                            .clicked()
-                        {
-                            self.set_app_theme(ctx, AppTheme::Dark);
-                            ui.close();
-                        }
-                        if ui
-                            .selectable_label(self.theme == AppTheme::Light, "Light")
-                            .clicked()
-                        {
-                            self.set_app_theme(ctx, AppTheme::Light);
-                            ui.close();
-                        }
-                    });
+            ui.separator();
+            ui.label(
+                egui::RichText::new(self.language.tools_count(total_tools)).color(tokens.muted),
+            );
+            badge(
+                ui,
+                self.theme,
+                &self.last_status,
+                status_fill(self.theme, &self.last_status),
+            );
+            ui.menu_button(self.language.settings(), |ui| {
+                ui.label(self.language.language_label());
+                ui.horizontal_wrapped(|ui| {
+                    ui.selectable_value(&mut self.language, Language::English, "English");
+                    ui.selectable_value(&mut self.language, Language::Chinese, "中文");
                 });
                 ui.separator();
-                badge(
-                    ui,
-                    self.theme,
-                    &self.last_status,
-                    status_fill(self.theme, &self.last_status),
-                );
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(self.language.tools_count(total_tools)).color(tokens.muted),
-                );
+                ui.label(text(self.language, "Theme", "主题"));
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .selectable_label(self.theme == AppTheme::Dark, "Dark")
+                        .clicked()
+                    {
+                        self.set_app_theme(ctx, AppTheme::Dark);
+                        ui.close();
+                    }
+                    if ui
+                        .selectable_label(self.theme == AppTheme::Light, "Light")
+                        .clicked()
+                    {
+                        self.set_app_theme(ctx, AppTheme::Light);
+                        ui.close();
+                    }
+                });
             });
         });
     }
@@ -1176,45 +1321,63 @@ impl CtfToolsApp {
                 });
         }
 
-        egui::TopBottomPanel::bottom("operations_status")
-            .exact_height(28.0)
-            .show(ctx, |ui| {
-                let tokens = ui_tokens(self.theme);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(egui::RichText::new(active_group.label(language)).color(tokens.text));
+        egui::TopBottomPanel::bottom("operations_status").show(ctx, |ui| {
+            let tokens = ui_tokens(self.theme);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(active_group.label(language)).color(tokens.text));
+                ui.separator();
+                ui.label(egui::RichText::new(active_group.hint(language)).color(tokens.muted));
+                if let Some(spec) = &selected_spec {
                     ui.separator();
-                    ui.label(egui::RichText::new(active_group.hint(language)).color(tokens.muted));
-                    if let Some(spec) = &selected_spec {
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} · {} · {}",
-                                spec.category, spec.backend, spec.safety
-                            ))
-                            .color(tokens.muted),
-                        );
-                    }
-                });
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {} · {}",
+                            spec.category, spec.backend, spec.safety
+                        ))
+                        .color(tokens.muted),
+                    );
+                }
             });
+        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if self.show_recipe {
-                    ui.vertical(|ui| {
-                        ui.set_width(370.0);
-                        self.render_recipe_panel(ui);
-                        if self.show_details {
+            let compact = ui.available_width() < COMPACT_OPERATIONS_WIDTH;
+            egui::ScrollArea::both()
+                .id_salt("operations_workspace_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if compact {
+                        if self.show_recipe {
+                            self.render_recipe_panel(ui);
+                            if self.show_details {
+                                ui.add_space(8.0);
+                                self.render_selected_details(ui, selected_spec.as_ref());
+                            }
                             ui.add_space(8.0);
-                            self.render_selected_details(ui, selected_spec.as_ref());
                         }
-                    });
-                    ui.separator();
-                }
-                ui.vertical(|ui| {
-                    ui.set_width(ui.available_width().max(360.0));
-                    self.render_io_panel(ui, ctx);
+                        self.render_io_panel(ui, ctx, selected_spec.as_ref());
+                    } else {
+                        ui.horizontal(|ui| {
+                            if self.show_recipe {
+                                let recipe_width =
+                                    (ui.available_width() * 0.38).clamp(300.0, 370.0);
+                                ui.vertical(|ui| {
+                                    ui.set_width(recipe_width);
+                                    self.render_recipe_panel(ui);
+                                    if self.show_details {
+                                        ui.add_space(8.0);
+                                        self.render_selected_details(ui, selected_spec.as_ref());
+                                    }
+                                });
+                                ui.separator();
+                            }
+                            ui.vertical(|ui| {
+                                ui.set_min_width(320.0);
+                                self.render_io_panel(ui, ctx, selected_spec.as_ref());
+                            });
+                        });
+                    }
                 });
-            });
         });
     }
 
@@ -1493,20 +1656,18 @@ impl CtfToolsApp {
 
     fn render_recipe_panel(&mut self, ui: &mut egui::Ui) {
         panel_frame(self.theme).show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 section_heading(
                     ui,
                     self.theme,
                     self.language.recipe_heading(),
                     Some(&self.language.steps_count(self.recipe.len())),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if soft_button(ui, self.theme, self.language.clear_recipe()).clicked() {
-                        self.recipe.clear();
-                        self.trace.clear();
-                        self.last_status = self.language.recipe_cleared().to_string();
-                    }
-                });
+                if soft_button(ui, self.theme, self.language.clear_recipe()).clicked() {
+                    self.recipe.clear();
+                    self.trace.clear();
+                    self.last_status = self.language.recipe_cleared().to_string();
+                }
             });
             ui.horizontal_wrapped(|ui| {
                 if primary_button(ui, self.theme, self.language.run_recipe()).clicked() {
@@ -1717,32 +1878,61 @@ impl CtfToolsApp {
         });
     }
 
-    fn render_io_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn render_io_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        selected_spec: Option<&OperationSpec>,
+    ) {
+        let accepted_input_kinds = self.active_flow_input_kinds(selected_spec);
+        self.handle_input_file_drops(ctx, &accepted_input_kinds);
+        let has_hovered_files = ctx.input(|input| !input.raw.hovered_files.is_empty());
+
         panel_frame(self.theme).show(ui, |ui| {
-            ui.set_width(ui.available_width().max(320.0));
-            ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width().min(320.0));
+            ui.horizontal_wrapped(|ui| {
                 section_heading(ui, self.theme, self.language.input_heading(), None);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    for kind in ["file", "bytes", "text"] {
+                for kind in ["text", "bytes", "file"] {
+                    if operation_accepts(&accepted_input_kinds, kind) {
                         ui.selectable_value(&mut self.input_kind, kind.to_string(), kind);
                     }
-                });
+                }
             });
 
+            if has_hovered_files {
+                egui::Frame::new()
+                    .fill(ui_tokens(self.theme).accent_soft)
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(8, 5))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(self.language.file_drop_hint())
+                                .small()
+                                .color(ui_tokens(self.theme).text),
+                        );
+                    });
+                ui.add_space(4.0);
+            }
+
+            if !operation_accepts(&accepted_input_kinds, &self.input_kind) {
+                self.input_kind = accepted_input_kinds
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "text".to_string());
+            }
+
             if self.input_kind == "file" {
-                let editor_width = ui.available_width().max(260.0);
                 ui.add(
                     egui::TextEdit::singleline(&mut self.file_path)
                         .hint_text("/path/to/file")
-                        .desired_width(editor_width),
+                        .desired_width(ui.available_width()),
                 );
             } else {
-                let editor_width = ui.available_width().max(260.0);
                 ui.add(
                     egui::TextEdit::multiline(&mut self.input)
                         .font(egui::TextStyle::Monospace)
                         .desired_rows(13)
-                        .desired_width(editor_width),
+                        .desired_width(ui.available_width()),
                 );
             }
 
@@ -1788,21 +1978,18 @@ impl CtfToolsApp {
             }
 
             ui.separator();
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 section_heading(ui, self.theme, self.language.result_heading(), None);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{} bytes", self.output.len()))
-                            .color(ui_tokens(self.theme).muted),
-                    );
-                });
+                ui.label(
+                    egui::RichText::new(format!("{} bytes", self.output.len()))
+                        .color(ui_tokens(self.theme).muted),
+                );
             });
-            let output_width = ui.available_width().max(260.0);
             ui.add(
                 egui::TextEdit::multiline(&mut self.output)
                     .font(egui::TextStyle::Monospace)
                     .desired_rows(18)
-                    .desired_width(output_width),
+                    .desired_width(ui.available_width()),
             );
         });
     }
@@ -1818,12 +2005,12 @@ impl eframe::App for CtfToolsApp {
             .map(|registry| registry.operations().len())
             .unwrap_or_default();
 
-        egui::TopBottomPanel::top("top")
-            .exact_height(48.0)
-            .show(ctx, |ui| {
-                ui.add_space(5.0);
-                self.render_top_toolbar(ui, ctx, total_tools);
-            });
+        egui::TopBottomPanel::top("top").show(ctx, |ui| {
+            ui.set_min_height(42.0);
+            ui.add_space(5.0);
+            self.render_top_toolbar(ui, ctx, total_tools);
+            ui.add_space(5.0);
+        });
 
         if self.workspace == AppWorkspace::Launcher {
             self.render_launcher(ctx);
@@ -2033,5 +2220,23 @@ fn category_title(category: &str, language: Language) -> &str {
         ("workspace.challenge", Language::English) => "Challenge Workspace",
         ("workspace.challenge", Language::Chinese) => "题目工作台",
         _ => category,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_file_detector_accepts_common_utf8_text() {
+        assert!(looks_like_text_bytes(
+            b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
+        ));
+        assert!(looks_like_text_bytes("flag{test}\n".as_bytes()));
+    }
+
+    #[test]
+    fn text_file_detector_rejects_binary_content() {
+        assert!(!looks_like_text_bytes(b"\0\xff\x10binary"));
     }
 }
