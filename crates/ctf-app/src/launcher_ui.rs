@@ -684,33 +684,38 @@ impl CtfToolsApp {
         language: Language,
     ) {
         let selected = self.launcher.active_category == category_id;
-        let response = card_frame(self.theme, selected).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(label).strong());
-                    ui.label(
-                        egui::RichText::new(self.language.tools_count(count))
-                            .small()
-                            .color(ui_tokens(self.theme).muted),
-                    );
+        let response = card_frame(self.theme, selected)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(label).strong());
+                        ui.label(
+                            egui::RichText::new(self.language.tools_count(count))
+                                .small()
+                                .color(ui_tokens(self.theme).muted),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        badge(
+                            ui,
+                            self.theme,
+                            count.to_string(),
+                            ui_tokens(self.theme).accent_soft,
+                        );
+                    });
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    badge(
-                        ui,
-                        self.theme,
-                        count.to_string(),
-                        ui_tokens(self.theme).accent_soft,
-                    );
-                });
-            });
-        });
-        if response.response.clicked() {
+            })
+            .response
+            .interact(egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
             self.launcher.active_category = category_id.to_string();
             if let Some(tool) = self.launcher.visible_tools().first() {
                 self.launcher.select_tool(&tool.id);
             }
         }
-        response.response.on_hover_text(match category_id {
+        response.on_hover_text(match category_id {
             ALL_ID => text(language, "Show every launcher entry", "显示全部启动器工具"),
             FAVORITES_ID => text(language, "Pinned tools", "收藏工具"),
             RECENT_ID => text(language, "Recently launched tools", "最近启动工具"),

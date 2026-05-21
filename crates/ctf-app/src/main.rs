@@ -1175,30 +1175,37 @@ impl CtfToolsApp {
             .show(ui, |ui| {
                 for (group, count) in categories.iter().zip(category_counts.iter()) {
                     let selected = self.active_category == group.id;
-                    let response = card_frame(self.theme, selected).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(group.label(self.language)).strong());
-                                ui.label(
-                                    egui::RichText::new(group.hint(self.language))
-                                        .small()
-                                        .color(ui_tokens(self.theme).muted),
+                    let response = card_frame(self.theme, selected)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(group.label(self.language)).strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(group.hint(self.language))
+                                            .small()
+                                            .color(ui_tokens(self.theme).muted),
+                                    );
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        badge(
+                                            ui,
+                                            self.theme,
+                                            count.to_string(),
+                                            ui_tokens(self.theme).accent_soft,
+                                        );
+                                    },
                                 );
                             });
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    badge(
-                                        ui,
-                                        self.theme,
-                                        count.to_string(),
-                                        ui_tokens(self.theme).accent_soft,
-                                    );
-                                },
-                            );
-                        });
-                    });
-                    if response.response.clicked() {
+                        })
+                        .response
+                        .interact(egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if response.clicked() {
                         self.select_category(group.id);
                     }
                     ui.add_space(5.0);
