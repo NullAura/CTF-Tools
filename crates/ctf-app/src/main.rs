@@ -6,17 +6,270 @@ struct OperationDragPayload {
     operation_id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Language {
+    English,
+    Chinese,
+}
+
+impl Language {
+    fn app_subtitle(self) -> &'static str {
+        match self {
+            Self::English => "Rust + Python local workbench",
+            Self::Chinese => "Rust + Python 本地工作台",
+        }
+    }
+
+    fn settings(self) -> &'static str {
+        match self {
+            Self::English => "Settings",
+            Self::Chinese => "设置",
+        }
+    }
+
+    fn language_label(self) -> &'static str {
+        match self {
+            Self::English => "Language",
+            Self::Chinese => "语言",
+        }
+    }
+
+    fn tools_count(self, count: usize) -> String {
+        match self {
+            Self::English => format!("{count} tools"),
+            Self::Chinese => format!("{count} 个工具"),
+        }
+    }
+
+    fn steps_count(self, count: usize) -> String {
+        match self {
+            Self::English => format!("{count} steps"),
+            Self::Chinese => format!("{count} 步"),
+        }
+    }
+
+    fn operation_name(self, spec: &OperationSpec) -> &str {
+        match self {
+            Self::English => spec.name_en.as_str(),
+            Self::Chinese => spec.name_zh.as_str(),
+        }
+    }
+
+    fn operation_item_name(self, item: &OperationListItem) -> &str {
+        match self {
+            Self::English => item.name_en.as_str(),
+            Self::Chinese => item.name_zh.as_str(),
+        }
+    }
+
+    fn categories_heading(self) -> &'static str {
+        match self {
+            Self::English => "Categories",
+            Self::Chinese => "功能分类",
+        }
+    }
+
+    fn registry_load_failed(self) -> &'static str {
+        match self {
+            Self::English => "Operation registry failed to load",
+            Self::Chinese => "注册表加载失败",
+        }
+    }
+
+    fn search_hint(self) -> &'static str {
+        match self {
+            Self::English => "Search, e.g. base64 / raw request / jwt",
+            Self::Chinese => "搜索，例如 base64 / 请求包 / jwt",
+        }
+    }
+
+    fn clear_search(self) -> &'static str {
+        match self {
+            Self::English => "Clear search",
+            Self::Chinese => "清除搜索",
+        }
+    }
+
+    fn recipe_heading(self) -> &'static str {
+        match self {
+            Self::English => "Recipe",
+            Self::Chinese => "配方链",
+        }
+    }
+
+    fn run_recipe(self) -> &'static str {
+        match self {
+            Self::English => "Run recipe",
+            Self::Chinese => "运行配方",
+        }
+    }
+
+    fn add_selected(self) -> &'static str {
+        match self {
+            Self::English => "Add selected",
+            Self::Chinese => "添加选中",
+        }
+    }
+
+    fn clear_recipe(self) -> &'static str {
+        match self {
+            Self::English => "Clear recipe",
+            Self::Chinese => "清空配方",
+        }
+    }
+
+    fn drop_tools(self) -> &'static str {
+        match self {
+            Self::English => "Drop tools here",
+            Self::Chinese => "拖入工具",
+        }
+    }
+
+    fn add_to_recipe(self) -> &'static str {
+        match self {
+            Self::English => "Add to recipe",
+            Self::Chinese => "加入配方链",
+        }
+    }
+
+    fn current_tool(self) -> &'static str {
+        match self {
+            Self::English => "Current tool",
+            Self::Chinese => "当前工具",
+        }
+    }
+
+    fn output_label(self) -> &'static str {
+        match self {
+            Self::English => "Output",
+            Self::Chinese => "输出",
+        }
+    }
+
+    fn input_heading(self) -> &'static str {
+        match self {
+            Self::English => "Input",
+            Self::Chinese => "输入",
+        }
+    }
+
+    fn run_selected(self) -> &'static str {
+        match self {
+            Self::English => "Run selected",
+            Self::Chinese => "运行选中",
+        }
+    }
+
+    fn clear_input(self) -> &'static str {
+        match self {
+            Self::English => "Clear input",
+            Self::Chinese => "清空输入",
+        }
+    }
+
+    fn copy_result(self) -> &'static str {
+        match self {
+            Self::English => "Copy result",
+            Self::Chinese => "复制结果",
+        }
+    }
+
+    fn result_heading(self) -> &'static str {
+        match self {
+            Self::English => "Result",
+            Self::Chinese => "结果",
+        }
+    }
+
+    fn no_operation_selected(self) -> &'static str {
+        match self {
+            Self::English => "No operation selected",
+            Self::Chinese => "未选择工具",
+        }
+    }
+
+    fn no_registry_loaded(self) -> &'static str {
+        match self {
+            Self::English => "No operation registry loaded",
+            Self::Chinese => "未加载工具注册表",
+        }
+    }
+
+    fn no_enabled_steps(self) -> &'static str {
+        match self {
+            Self::English => "No enabled steps",
+            Self::Chinese => "没有启用的步骤",
+        }
+    }
+
+    fn recipe_cleared(self) -> &'static str {
+        match self {
+            Self::English => "Recipe cleared",
+            Self::Chinese => "配方已清空",
+        }
+    }
+
+    fn recipe_updated(self) -> &'static str {
+        match self {
+            Self::English => "Recipe updated",
+            Self::Chinese => "配方已更新",
+        }
+    }
+
+    fn copied(self) -> &'static str {
+        match self {
+            Self::English => "Copied",
+            Self::Chinese => "已复制",
+        }
+    }
+
+    fn operation_not_found(self, operation_id: &str) -> String {
+        match self {
+            Self::English => format!("operation not found: {operation_id}"),
+            Self::Chinese => format!("未找到工具: {operation_id}"),
+        }
+    }
+
+    fn rejects_input_kind(self, operation_name: &str, current_kind: &str) -> String {
+        match self {
+            Self::English => {
+                format!("{operation_name} does not accept previous output kind `{current_kind}`")
+            }
+            Self::Chinese => format!("{operation_name} 不接受上一步输出类型 `{current_kind}`"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CategoryGroup {
     id: &'static str,
-    label: &'static str,
-    hint: &'static str,
+    label_en: &'static str,
+    label_zh: &'static str,
+    hint_en: &'static str,
+    hint_zh: &'static str,
     prefixes: &'static [&'static str],
+}
+
+impl CategoryGroup {
+    fn label(self, language: Language) -> &'static str {
+        match language {
+            Language::English => self.label_en,
+            Language::Chinese => self.label_zh,
+        }
+    }
+
+    fn hint(self, language: Language) -> &'static str {
+        match language {
+            Language::English => self.hint_en,
+            Language::Chinese => self.hint_zh,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 struct OperationListItem {
     id: String,
+    name_en: String,
     name_zh: String,
     category: String,
     priority: String,
@@ -110,6 +363,7 @@ fn install_style(ctx: &egui::Context) {
 
 struct CtfToolsApp {
     registry: Option<OperationRegistry>,
+    language: Language,
     query: String,
     active_category: String,
     selected_operation: Option<String>,
@@ -137,6 +391,7 @@ impl CtfToolsApp {
 
         Self {
             registry,
+            language: Language::English,
             query: String::new(),
             active_category: "all".to_string(),
             selected_operation,
@@ -155,7 +410,7 @@ impl CtfToolsApp {
         let (Some(registry), Some(operation)) =
             (self.registry.clone(), self.selected_operation.clone())
         else {
-            self.output = "No operation selected".to_string();
+            self.output = self.language.no_operation_selected().to_string();
             self.last_status = "Error".to_string();
             return;
         };
@@ -202,7 +457,7 @@ impl CtfToolsApp {
         }
 
         let Some(registry) = self.registry.clone() else {
-            self.output = "No operation registry loaded".to_string();
+            self.output = self.language.no_registry_loaded().to_string();
             self.last_status = "Error".to_string();
             return;
         };
@@ -237,7 +492,7 @@ impl CtfToolsApp {
             let operation_id = self.recipe[index].operation_id.clone();
             let Some(spec) = registry.find(&operation_id).cloned() else {
                 self.recipe[index].last_status = "Error".to_string();
-                self.output = format!("operation not found: {operation_id}");
+                self.output = self.language.operation_not_found(&operation_id);
                 self.last_status = "Error".to_string();
                 self.trace = trace;
                 self.warnings = warnings;
@@ -245,7 +500,10 @@ impl CtfToolsApp {
             };
             let Some(step_input_kind) = chain_input_kind(&spec, &current_kind) else {
                 self.recipe[index].last_status = "Error".to_string();
-                self.output = format!("{} 不接受上一步输出类型 `{}`", spec.name_zh, current_kind);
+                let operation_name = self.language.operation_name(&spec);
+                self.output = self
+                    .language
+                    .rejects_input_kind(operation_name, &current_kind);
                 self.last_status = "Error".to_string();
                 self.trace = trace;
                 self.warnings = warnings;
@@ -272,7 +530,7 @@ impl CtfToolsApp {
                     trace.push(format!(
                         "{}. {} -> {} bytes",
                         trace.len() + 1,
-                        spec.name_zh,
+                        self.language.operation_name(&spec),
                         joined.len()
                     ));
                 }
@@ -294,7 +552,7 @@ impl CtfToolsApp {
         self.last_status = if ran_any_step {
             "OK"
         } else {
-            "No enabled steps"
+            self.language.no_enabled_steps()
         }
         .to_string();
     }
@@ -307,12 +565,12 @@ impl CtfToolsApp {
             .is_none()
         {
             self.last_status = "Error".to_string();
-            self.output = format!("operation not found: {operation_id}");
+            self.output = self.language.operation_not_found(operation_id);
             return;
         }
 
         self.recipe.push(RecipeStep::new(operation_id));
-        self.last_status = "Recipe updated".to_string();
+        self.last_status = self.language.recipe_updated().to_string();
     }
 
     fn move_recipe_step(&mut self, index: usize, direction: isize) {
@@ -327,7 +585,7 @@ impl CtfToolsApp {
         };
         if target < self.recipe.len() {
             self.recipe.swap(index, target);
-            self.last_status = "Recipe updated".to_string();
+            self.last_status = self.language.recipe_updated().to_string();
         }
     }
 
@@ -369,6 +627,7 @@ impl CtfToolsApp {
             .filter(|op| operation_in_category(op.category.as_str(), &self.active_category))
             .map(|op| OperationListItem {
                 id: op.id.clone(),
+                name_en: op.name_en.clone(),
                 name_zh: op.name_zh.clone(),
                 category: op.category.clone(),
                 priority: op.priority.clone(),
@@ -388,6 +647,7 @@ impl CtfToolsApp {
 
 impl eframe::App for CtfToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let language = self.language;
         let selected_spec = self.registry.as_ref().and_then(|registry| {
             self.selected_operation
                 .as_deref()
@@ -421,12 +681,19 @@ impl eframe::App for CtfToolsApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.heading("CTF Tools");
-                ui.label("Rust + Python 本地工作台");
+                ui.label(language.app_subtitle());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.menu_button(self.language.settings(), |ui| {
+                        ui.label(self.language.language_label());
+                        ui.separator();
+                        ui.selectable_value(&mut self.language, Language::English, "English");
+                        ui.selectable_value(&mut self.language, Language::Chinese, "中文");
+                    });
+                    ui.separator();
                     ui.label(format!("Status: {}", self.last_status));
                     if let Some(registry) = &self.registry {
                         ui.separator();
-                        ui.label(format!("{} 个工具", registry.operations().len()));
+                        ui.label(language.tools_count(registry.operations().len()));
                     }
                 });
             });
@@ -435,9 +702,9 @@ impl eframe::App for CtfToolsApp {
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(active_group.label);
+                ui.label(active_group.label(language));
                 ui.separator();
-                ui.label(active_group.hint);
+                ui.label(active_group.hint(language));
                 if let Some(spec) = &selected_spec {
                     ui.separator();
                     ui.label(format!(
@@ -452,22 +719,26 @@ impl eframe::App for CtfToolsApp {
             .resizable(false)
             .default_width(220.0)
             .show(ctx, |ui| {
-                ui.heading("功能分类");
+                ui.heading(language.categories_heading());
                 ui.add_space(6.0);
                 if self.registry.is_some() {
                     for (group, count) in categories.iter().zip(category_counts.iter()) {
                         let selected = self.active_category == group.id;
                         let response = ui.selectable_label(
                             selected,
-                            format!("{}\n{} 个工具", group.label, count),
+                            format!(
+                                "{}\n{}",
+                                group.label(language),
+                                language.tools_count(*count)
+                            ),
                         );
                         if response.clicked() {
                             self.select_category(group.id);
                         }
-                        response.on_hover_text(group.hint);
+                        response.on_hover_text(group.hint(language));
                     }
                 } else {
-                    ui.colored_label(egui::Color32::RED, "注册表加载失败");
+                    ui.colored_label(egui::Color32::RED, language.registry_load_failed());
                 }
             });
 
@@ -475,19 +746,18 @@ impl eframe::App for CtfToolsApp {
             .resizable(true)
             .default_width(330.0)
             .show(ctx, |ui| {
-                ui.heading(active_group.label);
-                ui.label(active_group.hint);
+                ui.heading(active_group.label(language));
+                ui.label(active_group.hint(language));
                 ui.add_space(4.0);
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("搜索，例如 base64 / 请求包 / jwt"),
+                    egui::TextEdit::singleline(&mut self.query).hint_text(language.search_hint()),
                 );
                 ui.separator();
 
                 if self.registry.is_some() {
                     ui.horizontal(|ui| {
-                        ui.label(format!("{} 个工具", visible_operations.len()));
-                        if !self.query.is_empty() && ui.button("清除搜索").clicked() {
+                        ui.label(language.tools_count(visible_operations.len()));
+                        if !self.query.is_empty() && ui.button(language.clear_search()).clicked() {
                             self.query.clear();
                         }
                     });
@@ -500,7 +770,7 @@ impl eframe::App for CtfToolsApp {
                                 previous_category = op.category.clone();
                                 ui.add_space(6.0);
                                 ui.label(
-                                    egui::RichText::new(category_title(&op.category))
+                                    egui::RichText::new(category_title(&op.category, language))
                                         .strong()
                                         .color(egui::Color32::from_rgb(150, 170, 190)),
                                 );
@@ -508,7 +778,10 @@ impl eframe::App for CtfToolsApp {
                             let selected = self.selected_operation.as_deref() == Some(&op.id);
                             let label = format!(
                                 "{}\n{} · {} · {}",
-                                op.name_zh, op.id, op.priority, op.safety
+                                language.operation_item_name(op),
+                                op.id,
+                                op.priority,
+                                op.safety
                             );
                             ui.horizontal(|ui| {
                                 let drag_source = ui.dnd_drag_source(
@@ -528,7 +801,11 @@ impl eframe::App for CtfToolsApp {
                                             .unwrap_or_else(|| "text".to_string());
                                     }
                                 }
-                                if ui.small_button("+").on_hover_text("加入配方链").clicked() {
+                                if ui
+                                    .small_button("+")
+                                    .on_hover_text(language.add_to_recipe())
+                                    .clicked()
+                                {
                                     operation_to_add = Some(op.id.clone());
                                 }
                             });
@@ -538,7 +815,7 @@ impl eframe::App for CtfToolsApp {
                         self.add_operation_to_recipe(&operation_id);
                     }
                 } else {
-                    ui.colored_label(egui::Color32::RED, "注册表加载失败");
+                    ui.colored_label(egui::Color32::RED, language.registry_load_failed());
                 }
             });
 
@@ -547,25 +824,25 @@ impl eframe::App for CtfToolsApp {
                 ui.vertical(|ui| {
                     ui.set_width(360.0);
                     ui.horizontal(|ui| {
-                        ui.heading("配方链");
+                        ui.heading(language.recipe_heading());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(format!("{} 步", self.recipe.len()));
+                            ui.label(language.steps_count(self.recipe.len()));
                         });
                     });
 
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button("运行配方").clicked() {
+                        if ui.button(language.run_recipe()).clicked() {
                             self.run_recipe();
                         }
                         if let Some(operation_id) = self.selected_operation.clone()
-                            && ui.button("添加选中").clicked()
+                            && ui.button(language.add_selected()).clicked()
                         {
                             self.add_operation_to_recipe(&operation_id);
                         }
-                        if ui.button("清空配方").clicked() {
+                        if ui.button(language.clear_recipe()).clicked() {
                             self.recipe.clear();
                             self.trace.clear();
-                            self.last_status = "Recipe cleared".to_string();
+                            self.last_status = self.language.recipe_cleared().to_string();
                         }
                     });
 
@@ -582,7 +859,7 @@ impl eframe::App for CtfToolsApp {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(110.0);
                                     ui.label(
-                                        egui::RichText::new("拖入工具")
+                                        egui::RichText::new(language.drop_tools())
                                             .color(egui::Color32::from_rgb(120, 136, 154)),
                                     );
                                 });
@@ -594,7 +871,7 @@ impl eframe::App for CtfToolsApp {
                                             .as_ref()
                                             .and_then(|registry| registry.find(&step.operation_id));
                                         let name = spec
-                                            .map(|spec| spec.name_zh.as_str())
+                                            .map(|spec| language.operation_name(spec))
                                             .unwrap_or(step.operation_id.as_str());
                                         let detail = spec
                                             .map(|spec| {
@@ -668,17 +945,17 @@ impl eframe::App for CtfToolsApp {
                         && let Some(step) = self.recipe.get(index).cloned()
                     {
                         self.recipe.insert(index + 1, step);
-                        self.last_status = "Recipe updated".to_string();
+                        self.last_status = self.language.recipe_updated().to_string();
                     }
                     if let Some(index) = remove_step {
                         self.recipe.remove(index);
-                        self.last_status = "Recipe updated".to_string();
+                        self.last_status = self.language.recipe_updated().to_string();
                     }
 
                     ui.separator();
                     if let Some(spec) = &selected_spec {
-                        ui.label(egui::RichText::new("当前工具").strong());
-                        ui.label(&spec.name_zh);
+                        ui.label(egui::RichText::new(language.current_tool()).strong());
+                        ui.label(language.operation_name(spec));
                         ui.label(
                             egui::RichText::new(format!(
                                 "{} · {} · {}",
@@ -688,9 +965,13 @@ impl eframe::App for CtfToolsApp {
                             .color(egui::Color32::from_rgb(150, 164, 180)),
                         );
                         ui.horizontal(|ui| {
-                            ui.label(format!("输出: {}", spec.output.join(" / ")));
+                            ui.label(format!(
+                                "{}: {}",
+                                language.output_label(),
+                                spec.output.join(" / ")
+                            ));
                             ui.separator();
-                            ui.label(category_title(&spec.category));
+                            ui.label(category_title(&spec.category, language));
                         });
                     }
                 });
@@ -699,7 +980,7 @@ impl eframe::App for CtfToolsApp {
 
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.heading("输入");
+                        ui.heading(language.input_heading());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             for kind in ["file", "bytes", "text"] {
                                 ui.selectable_value(&mut self.input_kind, kind.to_string(), kind);
@@ -723,22 +1004,22 @@ impl eframe::App for CtfToolsApp {
                     }
 
                     ui.horizontal(|ui| {
-                        if ui.button("运行配方").clicked() {
+                        if ui.button(language.run_recipe()).clicked() {
                             self.run_recipe();
                         }
-                        if ui.button("运行选中").clicked() {
+                        if ui.button(language.run_selected()).clicked() {
                             self.run_selected();
                         }
-                        if ui.button("清空输入").clicked() {
+                        if ui.button(language.clear_input()).clicked() {
                             if self.input_kind == "file" {
                                 self.file_path.clear();
                             } else {
                                 self.input.clear();
                             }
                         }
-                        if ui.button("复制结果").clicked() && !self.output.is_empty() {
+                        if ui.button(language.copy_result()).clicked() && !self.output.is_empty() {
                             ctx.copy_text(self.output.clone());
-                            self.last_status = "Copied".to_string();
+                            self.last_status = self.language.copied().to_string();
                         }
                     });
 
@@ -763,7 +1044,7 @@ impl eframe::App for CtfToolsApp {
 
                     ui.separator();
                     ui.horizontal(|ui| {
-                        ui.heading("结果");
+                        ui.heading(language.result_heading());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(format!("{} bytes", self.output.len()));
                         });
@@ -828,56 +1109,74 @@ fn category_groups() -> Vec<CategoryGroup> {
     vec![
         CategoryGroup {
             id: "all",
-            label: "全部工具",
-            hint: "显示所有已注册工具",
+            label_en: "All Tools",
+            label_zh: "全部工具",
+            hint_en: "Show every registered operation",
+            hint_zh: "显示所有已注册工具",
             prefixes: &[],
         },
         CategoryGroup {
             id: "codecs",
-            label: "编码转换",
-            hint: "Base、URL、HTML、Unicode、进制、摩斯和自动解码",
+            label_en: "Codecs",
+            label_zh: "编码转换",
+            hint_en: "Base, URL, HTML, Unicode, radix, Morse, and auto decode",
+            hint_zh: "Base、URL、HTML、Unicode、进制、摩斯和自动解码",
             prefixes: &["codecs.", "program.auto", "program.esolang"],
         },
         CategoryGroup {
             id: "crypto",
-            label: "哈希与密码",
-            hint: "哈希、古典密码、XOR 和口令相关分析",
+            label_en: "Hash & Crypto",
+            label_zh: "哈希与密码",
+            hint_en: "Hashes, classical ciphers, XOR, and password analysis",
+            hint_zh: "哈希、古典密码、XOR 和口令相关分析",
             prefixes: &["crypto."],
         },
         CategoryGroup {
             id: "web",
-            label: "Web / HTTP / JWT",
-            hint: "请求包解析、代码生成、JWT 和资产分拣",
+            label_en: "Web / HTTP / JWT",
+            label_zh: "Web / HTTP / JWT",
+            hint_en: "Raw requests, code generation, JWT, and asset triage",
+            hint_zh: "请求包解析、代码生成、JWT 和资产分拣",
             prefixes: &["web."],
         },
         CategoryGroup {
             id: "forensics",
-            label: "文件与隐写",
-            hint: "Hex、熵、图片 Base64、GIF 分帧等本地取证工具",
+            label_en: "Files & Stego",
+            label_zh: "文件与隐写",
+            hint_en: "Hex, entropy, image Base64, GIF frames, and local forensics",
+            hint_zh: "Hex、熵、图片 Base64、GIF 分帧等本地取证工具",
             prefixes: &["file.", "forensics.image"],
         },
         CategoryGroup {
             id: "pcap",
-            label: "PCAP / USB",
-            hint: "HTTP、DNS、ICMP、TCP 流和 USB HID 分析",
+            label_en: "PCAP / USB",
+            label_zh: "PCAP / USB",
+            hint_en: "HTTP, DNS, ICMP, TCP streams, and USB HID analysis",
+            hint_zh: "HTTP、DNS、ICMP、TCP 流和 USB HID 分析",
             prefixes: &["forensics.pcap", "forensics.usb"],
         },
         CategoryGroup {
             id: "pwn",
-            label: "Pwn",
-            hint: "cyclic、pack/unpack、shellcode 汇编与反汇编",
+            label_en: "Pwn",
+            label_zh: "Pwn",
+            hint_en: "cyclic, pack/unpack, shellcode assembly and disassembly",
+            hint_zh: "cyclic、pack/unpack、shellcode 汇编与反汇编",
             prefixes: &["pwn."],
         },
         CategoryGroup {
             id: "reverse",
-            label: "逆向分析",
-            hint: "二进制信息和 strings 提取",
+            label_en: "Reverse",
+            label_zh: "逆向分析",
+            hint_en: "Binary info and strings extraction",
+            hint_zh: "二进制信息和 strings 提取",
             prefixes: &["reverse."],
         },
         CategoryGroup {
             id: "workspace",
-            label: "题目工作台",
-            hint: "题目记录和 writeup 生成入口",
+            label_en: "Workspace",
+            label_zh: "题目工作台",
+            hint_en: "Challenge notes and writeup templates",
+            hint_zh: "题目记录和 writeup 生成入口",
             prefixes: &["workspace."],
         },
     ]
@@ -928,31 +1227,46 @@ fn operation_in_category(category: &str, group_id: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn category_title(category: &str) -> &str {
-    match category {
-        "codecs.base" => "Base 编码",
-        "codecs.binary" => "二进制编码",
-        "codecs.number" => "进制转换",
-        "codecs.text" => "文本编码",
-        "codecs.web" => "Web 编码",
-        "crypto.classical" => "古典密码",
-        "crypto.hash" => "哈希",
-        "crypto.xor" => "XOR",
-        "file.inspect" => "文件检查",
-        "forensics.image" => "图片隐写",
-        "forensics.pcap" => "PCAP",
-        "forensics.usb" => "USB",
-        "program.auto" => "自动分析",
-        "program.esolang" => "Esolang",
-        "pwn.binary" => "Pwn 二进制",
-        "pwn.pattern" => "Pwn Pattern",
-        "pwn.shellcode" => "Shellcode",
-        "reverse.binary" => "逆向二进制",
-        "web.assets" => "资产分拣",
-        "web.http" => "HTTP",
-        "web.http.codegen" => "请求代码生成",
-        "web.token" => "Token / JWT",
-        "workspace.challenge" => "题目工作台",
+fn category_title(category: &str, language: Language) -> &str {
+    match (category, language) {
+        ("codecs.base", Language::English) => "Base Encoding",
+        ("codecs.base", Language::Chinese) => "Base 编码",
+        ("codecs.binary", Language::English) => "Binary Encoding",
+        ("codecs.binary", Language::Chinese) => "二进制编码",
+        ("codecs.number", Language::English) => "Radix Conversion",
+        ("codecs.number", Language::Chinese) => "进制转换",
+        ("codecs.text", Language::English) => "Text Encoding",
+        ("codecs.text", Language::Chinese) => "文本编码",
+        ("codecs.web", Language::English) => "Web Encoding",
+        ("codecs.web", Language::Chinese) => "Web 编码",
+        ("crypto.classical", Language::English) => "Classical Ciphers",
+        ("crypto.classical", Language::Chinese) => "古典密码",
+        ("crypto.hash", Language::English) => "Hashes",
+        ("crypto.hash", Language::Chinese) => "哈希",
+        ("crypto.xor", _) => "XOR",
+        ("file.inspect", Language::English) => "File Inspection",
+        ("file.inspect", Language::Chinese) => "文件检查",
+        ("forensics.image", Language::English) => "Image Stego",
+        ("forensics.image", Language::Chinese) => "图片隐写",
+        ("forensics.pcap", _) => "PCAP",
+        ("forensics.usb", _) => "USB",
+        ("program.auto", Language::English) => "Auto Analysis",
+        ("program.auto", Language::Chinese) => "自动分析",
+        ("program.esolang", _) => "Esolang",
+        ("pwn.binary", Language::English) => "Pwn Binary",
+        ("pwn.binary", Language::Chinese) => "Pwn 二进制",
+        ("pwn.pattern", _) => "Pwn Pattern",
+        ("pwn.shellcode", _) => "Shellcode",
+        ("reverse.binary", Language::English) => "Reverse Binary",
+        ("reverse.binary", Language::Chinese) => "逆向二进制",
+        ("web.assets", Language::English) => "Asset Triage",
+        ("web.assets", Language::Chinese) => "资产分拣",
+        ("web.http", _) => "HTTP",
+        ("web.http.codegen", Language::English) => "Request Codegen",
+        ("web.http.codegen", Language::Chinese) => "请求代码生成",
+        ("web.token", _) => "Token / JWT",
+        ("workspace.challenge", Language::English) => "Challenge Workspace",
+        ("workspace.challenge", Language::Chinese) => "题目工作台",
         _ => category,
     }
 }
