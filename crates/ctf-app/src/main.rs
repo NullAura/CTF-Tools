@@ -8,6 +8,11 @@ struct OperationDragPayload {
     operation_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct RecipeStepDragPayload {
+    index: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppWorkspace {
     Operations,
@@ -1401,8 +1406,8 @@ impl CtfToolsApp {
                 .stroke(egui::Stroke::new(1.0, ui_tokens(self.theme).border))
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::same(8));
-            let (_inner, dropped_operation) =
-                ui.dnd_drop_zone::<OperationDragPayload, _>(drop_frame, |ui| {
+            let (recipe_drop_zone, dropped_operation) = ui
+                .dnd_drop_zone::<OperationDragPayload, _>(drop_frame, |ui| {
                     ui.set_min_height(300.0);
                     if self.recipe.is_empty() {
                         empty_state(
@@ -1436,51 +1441,67 @@ impl CtfToolsApp {
                                         })
                                         .unwrap_or_else(|| step.operation_id.clone());
 
-                                    card_frame(self.theme, false).show(ui, |ui| {
-                                        let tokens = ui_tokens(self.theme);
-                                        ui.set_min_width(ui.available_width().max(220.0));
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.checkbox(&mut step.enabled, "");
-                                            ui.label(
-                                                egui::RichText::new(format!("{:02}", index + 1))
-                                                    .monospace()
-                                                    .color(tokens.dim),
-                                            );
-                                            ui.label(egui::RichText::new(name).strong());
-                                            badge(
-                                                ui,
-                                                self.theme,
-                                                &step.last_status,
-                                                status_fill(self.theme, &step.last_status),
-                                            );
-                                        });
-                                        ui.label(
-                                            egui::RichText::new(detail).small().color(tokens.muted),
-                                        );
-                                        if !step.output_preview.is_empty() {
-                                            ui.label(
-                                                egui::RichText::new(&step.output_preview)
-                                                    .small()
-                                                    .monospace()
-                                                    .color(tokens.muted),
-                                            );
-                                        }
-                                        ui.add_space(3.0);
-                                        ui.horizontal_wrapped(|ui| {
-                                            if ui.small_button("up").clicked() {
-                                                move_step = Some((index, -1));
-                                            }
-                                            if ui.small_button("down").clicked() {
-                                                move_step = Some((index, 1));
-                                            }
-                                            if ui.small_button("copy").clicked() {
-                                                duplicate_step = Some(index);
-                                            }
-                                            if ui.small_button("x").clicked() {
-                                                remove_step = Some(index);
-                                            }
-                                        });
-                                    });
+                                    ui.dnd_drag_source(
+                                        egui::Id::new(("recipe-step-drag", index)),
+                                        RecipeStepDragPayload { index },
+                                        |ui| {
+                                            card_frame(self.theme, false).show(ui, |ui| {
+                                                let tokens = ui_tokens(self.theme);
+                                                ui.set_min_width(ui.available_width().max(220.0));
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.checkbox(&mut step.enabled, "");
+                                                    ui.label(
+                                                        egui::RichText::new(format!(
+                                                            "{:02}",
+                                                            index + 1
+                                                        ))
+                                                        .monospace()
+                                                        .color(tokens.dim),
+                                                    );
+                                                    ui.label(egui::RichText::new(name).strong());
+                                                    badge(
+                                                        ui,
+                                                        self.theme,
+                                                        &step.last_status,
+                                                        status_fill(self.theme, &step.last_status),
+                                                    );
+                                                });
+                                                ui.label(
+                                                    egui::RichText::new(detail)
+                                                        .small()
+                                                        .color(tokens.muted),
+                                                );
+                                                if !step.output_preview.is_empty() {
+                                                    ui.label(
+                                                        egui::RichText::new(&step.output_preview)
+                                                            .small()
+                                                            .monospace()
+                                                            .color(tokens.muted),
+                                                    );
+                                                }
+                                                ui.add_space(3.0);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    if ui.small_button("up").clicked() {
+                                                        move_step = Some((index, -1));
+                                                    }
+                                                    if ui.small_button("down").clicked() {
+                                                        move_step = Some((index, 1));
+                                                    }
+                                                    if ui.small_button("copy").clicked() {
+                                                        duplicate_step = Some(index);
+                                                    }
+                                                    if ui.small_button("x").clicked() {
+                                                        remove_step = Some(index);
+                                                    }
+                                                    ui.label(
+                                                        egui::RichText::new("drag")
+                                                            .small()
+                                                            .color(tokens.dim),
+                                                    );
+                                                });
+                                            });
+                                        },
+                                    );
                                     ui.add_space(5.0);
                                 }
                             });
@@ -1489,6 +1510,17 @@ impl CtfToolsApp {
 
             if let Some(payload) = dropped_operation {
                 self.add_operation_to_recipe(&payload.operation_id);
+            }
+            if remove_step.is_none()
+                && ui.ctx().input(|input| input.pointer.any_released())
+                && let Some(pointer_pos) = ui
+                    .ctx()
+                    .input(|input| input.pointer.interact_pos().or(input.pointer.latest_pos()))
+                && !recipe_drop_zone.response.rect.contains(pointer_pos)
+                && let Some(payload) =
+                    egui::DragAndDrop::take_payload::<RecipeStepDragPayload>(ui.ctx())
+            {
+                remove_step = Some(payload.index);
             }
             if let Some((index, direction)) = move_step {
                 self.move_recipe_step(index, direction);
