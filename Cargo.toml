@@ -5,6 +5,7 @@ members = [
     "crates/ctf-codecs",
     "crates/ctf-core",
     "crates/ctf-crypto",
+    "crates/ctf-pwn",
     "crates/ctf-runner",
     "crates/ctf-stego",
     "crates/ctf-web",

@@ -488,3 +488,129 @@ safety = "safe"
 deterministic = true
 batchable = true
 priority = "P1"
+
+[[operations]]
+id = "binary.info"
+name_zh = "二进制信息"
+name_en = "Binary Info"
+category = "reverse.binary"
+aliases = ["elf info", "pe info", "macho info", "file magic"]
+input = ["text", "bytes", "file"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "reverse.strings"
+name_zh = "Strings 提取"
+name_en = "Extract Strings"
+category = "reverse.binary"
+aliases = ["strings", "字符串提取"]
+input = ["text", "bytes", "file"]
+output = ["json", "text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "pwn.cyclic.create"
+name_zh = "Cyclic 生成"
+name_en = "Create Cyclic Pattern"
+category = "pwn.pattern"
+aliases = ["cyclic", "pattern create"]
+input = ["text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "pwn.cyclic.offset"
+name_zh = "Cyclic 偏移"
+name_en = "Find Cyclic Offset"
+category = "pwn.pattern"
+aliases = ["cyclic offset", "pattern offset"]
+input = ["text"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "pwn.pack.u64_le"
+name_zh = "u64 小端打包"
+name_en = "Pack u64 Little Endian"
+category = "pwn.binary"
+aliases = ["p64", "pack u64", "小端打包"]
+input = ["text"]
+output = ["json", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "pwn.unpack.u64_le"
+name_zh = "u64 小端解包"
+name_en = "Unpack u64 Little Endian"
+category = "pwn.binary"
+aliases = ["u64", "unpack u64", "小端解包"]
+input = ["text", "bytes"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "shellcode.asm.x86_64"
+name_zh = "Shellcode 汇编"
+name_en = "Shellcode Assemble x86_64"
+category = "pwn.shellcode"
+aliases = ["asm", "shellcode asm", "x86_64 asm"]
+input = ["text"]
+output = ["json", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
+id = "shellcode.disasm.x86_64"
+name_zh = "Shellcode 反汇编"
+name_en = "Shellcode Disassemble x86_64"
+category = "pwn.shellcode"
+aliases = ["disasm", "shellcode disasm", "x86_64 disasm"]
+input = ["text", "bytes"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
+id = "workspace.writeup.template"
+name_zh = "Writeup 模板"
+name_en = "Writeup Template"
+category = "workspace.challenge"
+aliases = ["writeup", "challenge note", "题目笔记"]
+input = ["text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P2"

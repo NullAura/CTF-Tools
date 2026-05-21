@@ -13,6 +13,7 @@ pub fn default_runner() -> Result<OperationRunner> {
     let mut runner = OperationRunner::new(registry);
     ctf_codecs::register_handlers(&mut runner);
     ctf_crypto::register_handlers(&mut runner);
+    ctf_pwn::register_handlers(&mut runner);
     ctf_stego::register_handlers(&mut runner);
     ctf_web::register_handlers(&mut runner);
     Ok(runner)

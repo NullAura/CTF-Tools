@@ -8,6 +8,7 @@ version.workspace = true
 ctf-codecs = { path = "../ctf-codecs" }
 ctf-core = { path = "../ctf-core" }
 ctf-crypto = { path = "../ctf-crypto" }
+ctf-pwn = { path = "../ctf-pwn" }
 ctf-stego = { path = "../ctf-stego" }
 ctf-web = { path = "../ctf-web" }
 serde.workspace = true

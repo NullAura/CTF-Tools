@@ -901,12 +901,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctf-pwn"
+version = "0.1.0"
+dependencies = [
+ "ctf-core",
+ "hex",
+ "serde_json",
+]
+
+[[package]]
 name = "ctf-runner"
 version = "0.1.0"
 dependencies = [
  "ctf-codecs",
  "ctf-core",
  "ctf-crypto",
+ "ctf-pwn",
  "ctf-stego",
  "ctf-web",
  "serde",

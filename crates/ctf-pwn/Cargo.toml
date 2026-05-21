@@ -1,0 +1,10 @@
+[package]
+name = "ctf-pwn"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ctf-core = { path = "../ctf-core" }
+hex.workspace = true
+serde_json.workspace = true
