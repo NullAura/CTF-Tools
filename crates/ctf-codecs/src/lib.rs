@@ -15,6 +15,7 @@ const BASE62_ALPHABET: &[u8; 62] =
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("base64.decode", base64_decode);
     runner.register_handler("base64.encode", base64_encode);
+    runner.register_handler("base64.offsets", base64_offsets);
     runner.register_handler("base32.decode", base32_decode);
     runner.register_handler("base32.encode", base32_encode);
     runner.register_handler("base45.decode", base45_decode);
@@ -41,8 +42,11 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("octal.encode", octal_encode);
     runner.register_handler("decimal.decode", decimal_decode);
     runner.register_handler("decimal.encode", decimal_encode);
+    runner.register_handler("hexdump.decode", hexdump_decode);
+    runner.register_handler("hexdump.encode", hexdump_encode);
     runner.register_handler("hex.decode", hex_decode);
     runner.register_handler("hex.encode", hex_encode);
+    runner.register_handler("endian.swap", endian_swap);
     runner.register_handler("radix.convert", radix_convert);
     runner.register_handler("xor.single_byte_bruteforce", xor_single_byte_bruteforce);
     runner.register_handler("rot13.decode", rot13_decode);
@@ -69,6 +73,36 @@ fn base64_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Op
         "base64",
         base64::engine::general_purpose::STANDARD.encode(bytes),
     ))
+}
+
+fn base64_offsets(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let text = strip_ascii_ws(&request.input_text()?);
+    let offsets = (0..4)
+        .filter_map(|offset| {
+            let shifted = text.get(offset..)?;
+            let usable_len = shifted.len() - shifted.len() % 4;
+            if usable_len < 4 {
+                return None;
+            }
+            let candidate = &shifted[..usable_len];
+            let decoded = decode_base64_variant(candidate).ok()?;
+            Some(serde_json::json!({
+                "offset": offset,
+                "input_chars": usable_len,
+                "decoded_bytes": decoded.len(),
+                "preview": preview_decoded_bytes(&decoded),
+                "hex": hex::encode(&decoded),
+            }))
+        })
+        .collect::<Vec<_>>();
+
+    json_output(
+        "base64-offsets",
+        serde_json::json!({
+            "input_chars": text.len(),
+            "offsets": offsets,
+        }),
+    )
 }
 
 fn base32_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
@@ -326,6 +360,19 @@ fn decimal_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<O
     ))
 }
 
+fn hexdump_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = decode_hexdump(&request.input_text()?)?;
+    Ok(single_output("text", "decoded", bytes_to_display(bytes)))
+}
+
+fn hexdump_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    Ok(single_output(
+        "text",
+        "hexdump",
+        encode_hexdump(&request.input_bytes()?),
+    ))
+}
+
 fn hex_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let text = request
         .input_text()?
@@ -342,6 +389,21 @@ fn hex_encode(_spec: &OperationSpec, request: &OperationRequest) -> Result<Opera
         "hex",
         hex::encode(request.input_bytes()?),
     ))
+}
+
+fn endian_swap(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let (word_size, bytes) = parse_endian_request(request)?;
+    if word_size == 0 || word_size > 64 {
+        return Err(CtfError::InvalidInput(
+            "word size must be between 1 and 64".to_string(),
+        ));
+    }
+
+    let mut out = Vec::with_capacity(bytes.len());
+    for chunk in bytes.chunks(word_size) {
+        out.extend(chunk.iter().rev());
+    }
+    Ok(single_output("text", "swapped-hex", hex::encode(out)))
 }
 
 fn radix_convert(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
@@ -568,6 +630,147 @@ fn strip_ascii_ws(value: &str) -> String {
         .chars()
         .filter(|ch| !ch.is_ascii_whitespace())
         .collect()
+}
+
+fn decode_base64_variant(text: &str) -> Result<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD
+        .decode(text.as_bytes())
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(text.as_bytes()))
+        .map_err(|error| CtfError::InvalidInput(format!("invalid base64: {error}")))
+}
+
+fn preview_decoded_bytes(bytes: &[u8]) -> String {
+    let preview = bytes_to_lossy_text(bytes);
+    preview_text_value(&preview, 96)
+}
+
+fn preview_text_value(value: &str, limit: usize) -> String {
+    let mut out = String::new();
+    for (index, ch) in value.replace(['\r', '\n'], " ").chars().enumerate() {
+        if index >= limit {
+            out.push_str("...");
+            return out;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn encode_hexdump(bytes: &[u8]) -> String {
+    let mut lines = Vec::new();
+    for (offset, chunk) in bytes.chunks(16).enumerate() {
+        let address = offset * 16;
+        let mut hex_part = String::new();
+        for index in 0..16 {
+            if index > 0 {
+                hex_part.push(' ');
+                if index == 8 {
+                    hex_part.push(' ');
+                }
+            }
+            if let Some(byte) = chunk.get(index) {
+                hex_part.push_str(&format!("{byte:02x}"));
+            } else {
+                hex_part.push_str("  ");
+            }
+        }
+        let ascii = chunk
+            .iter()
+            .map(|byte| {
+                if byte.is_ascii_graphic() || *byte == b' ' {
+                    *byte as char
+                } else {
+                    '.'
+                }
+            })
+            .collect::<String>();
+        lines.push(format!("{address:08x}  {hex_part}  |{ascii}|"));
+    }
+    lines.join("\n")
+}
+
+fn decode_hexdump(text: &str) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    for line in text.lines() {
+        let hex_part = line.split('|').next().unwrap_or(line);
+        let mut tokens = hex_part.split_whitespace().collect::<Vec<_>>();
+        if tokens.first().is_some_and(|token| {
+            let trimmed = token.trim_end_matches(':');
+            (tokens.len() > 1 || token.ends_with(':') || line.contains('|'))
+                && is_hexdump_offset(trimmed)
+        }) {
+            tokens.remove(0);
+        }
+
+        for token in tokens {
+            let token = token.trim_matches(|ch: char| ch == ':' || ch == ';' || ch == ',');
+            if token.len() == 2 && token.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                let value = u8::from_str_radix(token, 16).map_err(|error| {
+                    CtfError::InvalidInput(format!("invalid hexdump byte `{token}`: {error}"))
+                })?;
+                bytes.push(value);
+            } else if token.len() > 2
+                && token.len() % 2 == 0
+                && token.chars().all(|ch| ch.is_ascii_hexdigit())
+                && !line.contains('|')
+            {
+                for index in (0..token.len()).step_by(2) {
+                    let value =
+                        u8::from_str_radix(&token[index..index + 2], 16).map_err(|error| {
+                            CtfError::InvalidInput(format!(
+                                "invalid hexdump byte `{}`: {error}",
+                                &token[index..index + 2]
+                            ))
+                        })?;
+                    bytes.push(value);
+                }
+            }
+        }
+    }
+
+    if bytes.is_empty() {
+        return Err(CtfError::InvalidInput(
+            "no hexadecimal bytes found in hexdump".to_string(),
+        ));
+    }
+    Ok(bytes)
+}
+
+fn is_hexdump_offset(token: &str) -> bool {
+    (4..=16).contains(&token.len()) && token.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn parse_endian_request(request: &OperationRequest) -> Result<(usize, Vec<u8>)> {
+    if request.input.kind != "text" {
+        return Ok((4, request.input_bytes()?));
+    }
+
+    let text = request.input_text()?;
+    let mut word_size = 4usize;
+    let mut value_parts = Vec::new();
+    for token in text.split_whitespace() {
+        if let Some(value) = token
+            .strip_prefix("word=")
+            .or_else(|| token.strip_prefix("size="))
+            .or_else(|| token.strip_prefix("chunk="))
+        {
+            word_size = value.parse::<usize>().map_err(|error| {
+                CtfError::InvalidInput(format!("invalid endian word size: {error}"))
+            })?;
+        } else if let Some(value) = token.strip_prefix("value=") {
+            value_parts.push(value.to_string());
+        } else {
+            value_parts.push(token.to_string());
+        }
+    }
+
+    let value = value_parts.join("");
+    let bytes = if value.chars().all(|ch| ch.is_ascii_hexdigit()) && value.len() % 2 == 0 {
+        hex::decode(&value).map_err(|error| CtfError::InvalidInput(error.to_string()))?
+    } else {
+        text.as_bytes().to_vec()
+    };
+    Ok((word_size, bytes))
 }
 
 fn encode_base45(bytes: &[u8]) -> String {
@@ -1257,6 +1460,17 @@ mod tests {
     }
 
     #[test]
+    fn base64_offsets_show_shifted_candidates() {
+        let response = base64_offsets(
+            &dummy_spec(),
+            &request("base64.offsets", "xZmxhZ3t0ZXN0fQ=="),
+        )
+        .expect("base64 offsets");
+        assert!(response.outputs[0].value.contains("\"offset\": 1"));
+        assert!(response.outputs[0].value.contains("flag{test}"));
+    }
+
+    #[test]
     fn cyberchef_base_codecs_round_trip() {
         for (encode, decode, expected) in [
             (
@@ -1326,6 +1540,43 @@ mod tests {
                 .value,
             "Hi"
         );
+    }
+
+    #[test]
+    fn hexdump_round_trips() {
+        let encoded = hexdump_encode(&dummy_spec(), &request("hexdump.encode", "flag{test}"))
+            .expect("hexdump encode")
+            .outputs[0]
+            .value
+            .clone();
+        assert!(encoded.contains("00000000"));
+        assert!(encoded.contains("|flag{test}|"));
+        let decoded = hexdump_decode(&dummy_spec(), &request("hexdump.decode", &encoded))
+            .expect("hexdump decode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(decoded, "flag{test}");
+        let decoded = hexdump_decode(&dummy_spec(), &request("hexdump.decode", "666c6167"))
+            .expect("plain hex should decode")
+            .outputs[0]
+            .value
+            .clone();
+        assert_eq!(decoded, "flag");
+    }
+
+    #[test]
+    fn endian_swap_defaults_to_u32_chunks() {
+        let response = endian_swap(&dummy_spec(), &request("endian.swap", "0011223344556677"))
+            .expect("endian swap");
+        assert_eq!(response.outputs[0].value, "3322110077665544");
+
+        let response = endian_swap(
+            &dummy_spec(),
+            &request("endian.swap", "word=2 value=00112233"),
+        )
+        .expect("endian swap word");
+        assert_eq!(response.outputs[0].value, "11003322");
     }
 
     #[test]

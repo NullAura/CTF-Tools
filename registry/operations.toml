@@ -32,6 +32,20 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "base64.offsets"
+name_zh = "Base64 偏移分析"
+name_en = "Show Base64 Offsets"
+category = "codecs.base"
+aliases = ["base64 offsets", "show base64 offsets", "base64偏移"]
+input = ["text", "file"]
+output = ["json", "text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "base45.decode"
 name_zh = "Base45 解码"
 name_en = "Base45 Decode"
@@ -396,6 +410,34 @@ batchable = true
 priority = "P1"
 
 [[operations]]
+id = "hexdump.decode"
+name_zh = "Hexdump 解码"
+name_en = "From Hexdump"
+category = "codecs.binary"
+aliases = ["from hexdump", "xxd reverse", "hexdump解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "hexdump.encode"
+name_zh = "Hexdump 编码"
+name_en = "To Hexdump"
+category = "codecs.binary"
+aliases = ["to hexdump", "xxd", "hexdump编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "hex.decode"
 name_zh = "Hex 解码"
 name_en = "Hex Decode"
@@ -422,6 +464,20 @@ safety = "safe"
 deterministic = true
 batchable = true
 priority = "P0"
+
+[[operations]]
+id = "endian.swap"
+name_zh = "字节序交换"
+name_en = "Swap Endianness"
+category = "codecs.binary"
+aliases = ["swap endianness", "byte order", "字节序", "大小端转换"]
+input = ["text", "bytes", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
 
 [[operations]]
 id = "hash.md5"
