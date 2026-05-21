@@ -898,6 +898,7 @@ dependencies = [
  "ctf-codecs",
  "ctf-core",
  "ctf-crypto",
+ "ctf-web",
 ]
 
 [[package]]
@@ -907,6 +908,12 @@ version = "0.1.0"
 [[package]]
 name = "ctf-web"
 version = "0.1.0"
+dependencies = [
+ "base64",
+ "ctf-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cursor-icon"

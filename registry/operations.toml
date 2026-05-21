@@ -366,6 +366,42 @@ redact_by_default = true
 fields = ["cookie", "authorization", "x-api-key", "token", "set-cookie"]
 
 [[operations]]
+id = "http.raw.to_python_httpx"
+name_zh = "请求包转 Python httpx"
+name_en = "Raw HTTP to Python httpx"
+category = "web.http.codegen"
+aliases = ["request to httpx", "burp to httpx", "请求包转httpx"]
+input = ["text", "file"]
+output = ["code.python"]
+backend = "rust"
+safety = "sensitive"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["cookie", "authorization", "x-api-key", "token", "set-cookie"]
+
+[[operations]]
+id = "http.raw.to_fetch"
+name_zh = "请求包转 fetch"
+name_en = "Raw HTTP to fetch"
+category = "web.http.codegen"
+aliases = ["request to fetch", "burp to fetch", "请求包转fetch"]
+input = ["text", "file"]
+output = ["code.javascript"]
+backend = "rust"
+safety = "sensitive"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["cookie", "authorization", "x-api-key", "token", "set-cookie"]
+
+[[operations]]
 id = "jwt.decode"
 name_zh = "JWT 解析"
 name_en = "JWT Decode"
