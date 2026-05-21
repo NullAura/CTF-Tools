@@ -1,0 +1,16 @@
+[package]
+name = "ctf-cli"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ctf-tools"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+ctf-core = { path = "../ctf-core" }
+serde_json.workspace = true
+

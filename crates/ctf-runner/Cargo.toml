@@ -1,0 +1,8 @@
+[package]
+name = "ctf-runner"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+

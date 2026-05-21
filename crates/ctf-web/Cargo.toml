@@ -1,0 +1,8 @@
+[package]
+name = "ctf-web"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+

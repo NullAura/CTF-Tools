@@ -1,0 +1,15 @@
+[package]
+name = "ctf-app"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ctf-app"
+path = "src/main.rs"
+
+[dependencies]
+ctf-core = { path = "../ctf-core" }
+eframe.workspace = true
+egui.workspace = true
+
