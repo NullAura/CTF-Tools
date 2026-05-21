@@ -6,11 +6,15 @@ use ctf_core::{
     Result,
 };
 use data_encoding::{BASE32, BASE32_NOPAD};
+use std::collections::HashSet;
 
 const BASE45_ALPHABET: &[u8; 45] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE62_ALPHABET: &[u8; 62] =
     b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const AUTO_DECODE_MAX_DEPTH: usize = 5;
+const AUTO_DECODE_BEAM_WIDTH: usize = 64;
+const AUTO_DECODE_MAX_VALUE_LEN: usize = 128 * 1024;
 
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("base64.decode", base64_decode);
@@ -59,10 +63,7 @@ pub fn register_handlers(runner: &mut OperationRunner) {
 
 fn base64_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let text = strip_ascii_ws(&request.input_text()?);
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(text.as_bytes())
-        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(text.as_bytes()))
-        .map_err(|error| CtfError::InvalidInput(format!("invalid base64: {error}")))?;
+    let bytes = decode_base64_variant(&text)?;
     Ok(single_output("text", "decoded", bytes_to_display(bytes)))
 }
 
@@ -550,68 +551,7 @@ fn brainfuck_run(_spec: &OperationSpec, request: &OperationRequest) -> Result<Op
 
 fn auto_decode(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
     let input = request.input_text()?;
-    let mut candidates = Vec::new();
-
-    if let Ok(response) = base64_decode(&dummy_operation("base64.decode"), request) {
-        push_candidate(&mut candidates, "base64.decode", &response.outputs[0].value);
-    }
-
-    if let Ok(response) = hex_decode(&dummy_operation("hex.decode"), request) {
-        push_candidate(&mut candidates, "hex.decode", &response.outputs[0].value);
-    }
-
-    if let Ok(response) = base45_decode(&dummy_operation("base45.decode"), request) {
-        push_candidate(&mut candidates, "base45.decode", &response.outputs[0].value);
-    }
-
-    if let Ok(response) = base58_decode(&dummy_operation("base58.decode"), request) {
-        push_candidate(&mut candidates, "base58.decode", &response.outputs[0].value);
-    }
-
-    if let Ok(response) = base62_decode(&dummy_operation("base62.decode"), request) {
-        push_candidate(&mut candidates, "base62.decode", &response.outputs[0].value);
-    }
-
-    if let Ok(response) = base85_decode(&dummy_operation("base85.decode"), request) {
-        push_candidate(&mut candidates, "base85.decode", &response.outputs[0].value);
-    }
-
-    if input.contains('=')
-        && let Ok(response) =
-            quoted_printable_decode(&dummy_operation("quoted_printable.decode"), request)
-    {
-        push_candidate(
-            &mut candidates,
-            "quoted_printable.decode",
-            &response.outputs[0].value,
-        );
-    }
-
-    if input.contains('%')
-        && let Ok(response) = url_decode(&dummy_operation("url.decode"), request)
-    {
-        push_candidate(&mut candidates, "url.decode", &response.outputs[0].value);
-    }
-
-    if input.contains("\\u")
-        && let Ok(response) = unicode_decode(&dummy_operation("unicode.decode"), request)
-    {
-        push_candidate(
-            &mut candidates,
-            "unicode.decode",
-            &response.outputs[0].value,
-        );
-    }
-
-    if input
-        .chars()
-        .all(|ch| ch.is_ascii_digit() || ch.is_ascii_whitespace() || ch == ',' || ch == ';')
-        && let Ok(response) = ascii_decode(&dummy_operation("ascii.decode"), request)
-    {
-        push_candidate(&mut candidates, "ascii.decode", &response.outputs[0].value);
-    }
-
-    candidates.sort_by(|a: &AutoCandidate, b| b.score.total_cmp(&a.score));
+    let candidates = search_auto_decode_paths(&input);
     let value = format_auto_decode_candidates(&candidates);
     Ok(single_output("text", "auto", value))
 }
@@ -633,9 +573,17 @@ fn strip_ascii_ws(value: &str) -> String {
 }
 
 fn decode_base64_variant(text: &str) -> Result<Vec<u8>> {
+    let padded = match text.len() % 4 {
+        0 => text.to_string(),
+        2 => format!("{text}=="),
+        3 => format!("{text}="),
+        _ => text.to_string(),
+    };
     base64::engine::general_purpose::STANDARD
         .decode(text.as_bytes())
         .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(text.as_bytes()))
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(padded.as_bytes()))
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(padded.as_bytes()))
         .map_err(|error| CtfError::InvalidInput(format!("invalid base64: {error}")))
 }
 
@@ -1373,21 +1321,213 @@ fn score_xor_plaintext(bytes: &[u8], text: &str) -> f64 {
     score
 }
 
+type AutoDecodeHandler = fn(&OperationSpec, &OperationRequest) -> Result<OperationResponse>;
+type AutoDecodeGate = fn(&str) -> bool;
+
+struct AutoDecoder {
+    id: &'static str,
+    handler: AutoDecodeHandler,
+    gate: AutoDecodeGate,
+}
+
+#[derive(Clone)]
+struct AutoSearchState {
+    path: Vec<&'static str>,
+    score: f32,
+    value: String,
+}
+
 struct AutoCandidate {
     path: String,
     score: f32,
     value: String,
 }
 
-fn push_candidate(candidates: &mut Vec<AutoCandidate>, path: &str, value: &str) {
-    if value.is_empty() {
-        return;
+fn search_auto_decode_paths(input: &str) -> Vec<AutoCandidate> {
+    let decoders = auto_decoders();
+    let mut visited = HashSet::from([input.to_string()]);
+    let mut frontier = vec![AutoSearchState {
+        path: Vec::new(),
+        score: score_auto_value(input, 0),
+        value: input.to_string(),
+    }];
+    let mut candidates = Vec::new();
+
+    for _ in 0..AUTO_DECODE_MAX_DEPTH {
+        let mut next_frontier = Vec::new();
+
+        for state in &frontier {
+            for decoder in &decoders {
+                if !should_try_decoder(&state.path, decoder, &state.value) {
+                    continue;
+                }
+                let Some(decoded) = run_auto_decoder(decoder, &state.value) else {
+                    continue;
+                };
+                if decoded == state.value
+                    || decoded.trim().is_empty()
+                    || decoded.len() > AUTO_DECODE_MAX_VALUE_LEN
+                    || !visited.insert(decoded.clone())
+                {
+                    continue;
+                }
+
+                let mut path = state.path.clone();
+                path.push(decoder.id);
+                let score = score_auto_value(&decoded, path.len());
+                candidates.push(AutoCandidate {
+                    path: path.join(" -> "),
+                    score,
+                    value: decoded.clone(),
+                });
+
+                next_frontier.push(AutoSearchState {
+                    path,
+                    score,
+                    value: decoded,
+                });
+            }
+        }
+
+        if next_frontier.is_empty() {
+            break;
+        }
+        next_frontier.sort_by(|a, b| b.score.total_cmp(&a.score));
+        next_frontier.truncate(AUTO_DECODE_BEAM_WIDTH);
+        frontier = next_frontier;
     }
-    candidates.push(AutoCandidate {
-        path: path.to_string(),
-        score: score_text(value),
-        value: value.to_string(),
+
+    candidates.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.path.len().cmp(&b.path.len()))
     });
+    dedupe_auto_candidates(candidates)
+}
+
+fn auto_decoders() -> Vec<AutoDecoder> {
+    vec![
+        AutoDecoder {
+            id: "base64.decode",
+            handler: base64_decode,
+            gate: looks_like_base64_text,
+        },
+        AutoDecoder {
+            id: "base32.decode",
+            handler: base32_decode,
+            gate: looks_like_base32_text,
+        },
+        AutoDecoder {
+            id: "base45.decode",
+            handler: base45_decode,
+            gate: looks_like_base45_text,
+        },
+        AutoDecoder {
+            id: "base58.decode",
+            handler: base58_decode,
+            gate: looks_like_base58_text,
+        },
+        AutoDecoder {
+            id: "base62.decode",
+            handler: base62_decode,
+            gate: looks_like_base62_text,
+        },
+        AutoDecoder {
+            id: "base85.decode",
+            handler: base85_decode,
+            gate: looks_like_base85_text,
+        },
+        AutoDecoder {
+            id: "url.decode",
+            handler: url_decode,
+            gate: looks_like_url_encoded_text,
+        },
+        AutoDecoder {
+            id: "html.decode",
+            handler: html_decode,
+            gate: looks_like_html_encoded_text,
+        },
+        AutoDecoder {
+            id: "unicode.decode",
+            handler: unicode_decode,
+            gate: looks_like_unicode_encoded_text,
+        },
+        AutoDecoder {
+            id: "quoted_printable.decode",
+            handler: quoted_printable_decode,
+            gate: looks_like_quoted_printable_text,
+        },
+        AutoDecoder {
+            id: "hex.decode",
+            handler: hex_decode,
+            gate: looks_like_hex_text,
+        },
+        AutoDecoder {
+            id: "binary.decode",
+            handler: binary_decode,
+            gate: looks_like_binary_text,
+        },
+        AutoDecoder {
+            id: "octal.decode",
+            handler: octal_decode,
+            gate: looks_like_octal_text,
+        },
+        AutoDecoder {
+            id: "decimal.decode",
+            handler: decimal_decode,
+            gate: looks_like_decimal_byte_text,
+        },
+        AutoDecoder {
+            id: "ascii.decode",
+            handler: ascii_decode,
+            gate: looks_like_ascii_code_text,
+        },
+        AutoDecoder {
+            id: "rot13.decode",
+            handler: rot13_decode,
+            gate: looks_like_rot13_text,
+        },
+        AutoDecoder {
+            id: "morse.decode",
+            handler: morse_decode,
+            gate: looks_like_morse_text,
+        },
+    ]
+}
+
+fn should_try_decoder(path: &[&str], decoder: &AutoDecoder, value: &str) -> bool {
+    if path.last().is_some_and(|last| *last == decoder.id) {
+        return false;
+    }
+    if matches!(decoder.id, "base58.decode" | "base62.decode") && looks_like_hex_text(value) {
+        return false;
+    }
+    (decoder.gate)(value)
+}
+
+fn run_auto_decoder(decoder: &AutoDecoder, value: &str) -> Option<String> {
+    let request = OperationRequest {
+        operation: decoder.id.to_string(),
+        input: ctf_core::OperationInput {
+            kind: "text".to_string(),
+            value: value.to_string(),
+        },
+        limits: ctf_core::TaskLimits::default(),
+    };
+    let response = (decoder.handler)(&dummy_operation(decoder.id), &request).ok()?;
+    response.outputs.first().map(|output| output.value.clone())
+}
+
+fn dedupe_auto_candidates(candidates: Vec<AutoCandidate>) -> Vec<AutoCandidate> {
+    let mut seen_values = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|candidate| seen_values.insert(candidate.value.clone()))
+        .collect()
+}
+
+fn score_auto_value(value: &str, depth: usize) -> f32 {
+    score_text(value) + (depth as f32 * 0.04)
 }
 
 fn score_text(value: &str) -> f32 {
@@ -1399,9 +1539,170 @@ fn score_text(value: &str) -> f32 {
     let mut score = printable / total;
     let lower = value.to_ascii_lowercase();
     if lower.contains("flag{") || lower.contains("ctf{") {
-        score += 1.0;
+        score += 2.0;
+    }
+    for marker in [
+        "flag", "ctf", "key{", "http://", "https://", "password", "admin",
+    ] {
+        if lower.contains(marker) {
+            score += 0.25;
+        }
+    }
+    if looks_like_encoded_blob(value) {
+        score -= 0.15;
     }
     score
+}
+
+fn looks_like_encoded_blob(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 16
+        && (looks_like_base64_text(value)
+            || looks_like_base32_text(value)
+            || looks_like_hex_text(value)
+            || looks_like_url_encoded_text(value))
+}
+
+fn looks_like_base64_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 4
+        && compact.len() % 4 != 1
+        && compact
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '/' | '-' | '_' | '='))
+}
+
+fn looks_like_base32_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value).to_ascii_uppercase();
+    compact.len() >= 8
+        && compact.len() % 8 != 1
+        && compact
+            .chars()
+            .all(|ch| matches!(ch, 'A'..='Z' | '2'..='7' | '='))
+}
+
+fn looks_like_base45_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 6 && compact.bytes().all(|byte| BASE45_ALPHABET.contains(&byte))
+}
+
+fn looks_like_base58_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 8 && compact.bytes().all(|byte| BASE58_ALPHABET.contains(&byte))
+}
+
+fn looks_like_base62_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 8
+        && compact.chars().all(|ch| ch.is_ascii_alphanumeric())
+        && compact.chars().any(|ch| ch.is_ascii_digit())
+        && compact.chars().any(|ch| ch.is_ascii_alphabetic())
+}
+
+fn looks_like_base85_text(value: &str) -> bool {
+    let compact = value.trim();
+    compact.len() >= 5
+        && compact.bytes().all(|byte| (33..=117).contains(&byte))
+        && (compact.contains("<~")
+            || compact.chars().any(|ch| {
+                !ch.is_ascii_alphanumeric() && !matches!(ch, '+' | '/' | '-' | '_' | '=')
+            }))
+}
+
+fn looks_like_url_encoded_text(value: &str) -> bool {
+    value.as_bytes().windows(3).any(|window| {
+        window[0] == b'%' && window[1].is_ascii_hexdigit() && window[2].is_ascii_hexdigit()
+    })
+}
+
+fn looks_like_html_encoded_text(value: &str) -> bool {
+    ["&lt;", "&gt;", "&quot;", "&#39;", "&apos;", "&amp;"]
+        .iter()
+        .any(|entity| value.contains(entity))
+}
+
+fn looks_like_unicode_encoded_text(value: &str) -> bool {
+    value.contains("\\u")
+}
+
+fn looks_like_quoted_printable_text(value: &str) -> bool {
+    value.as_bytes().windows(3).any(|window| {
+        window[0] == b'=' && window[1].is_ascii_hexdigit() && window[2].is_ascii_hexdigit()
+    }) || value.contains("=\n")
+        || value.contains("=\r\n")
+}
+
+fn looks_like_hex_text(value: &str) -> bool {
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 4
+        && compact.len().is_multiple_of(2)
+        && compact.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn looks_like_binary_text(value: &str) -> bool {
+    let tokens = split_code_tokens(value);
+    if tokens.len() >= 2 {
+        return tokens
+            .iter()
+            .all(|token| token.len() == 8 && token.chars().all(|ch| matches!(ch, '0' | '1')));
+    }
+    let compact = strip_ascii_ws(value);
+    compact.len() >= 8
+        && compact.len().is_multiple_of(8)
+        && compact.chars().all(|ch| matches!(ch, '0' | '1'))
+}
+
+fn looks_like_octal_text(value: &str) -> bool {
+    let tokens = split_code_tokens(value);
+    tokens.len() >= 2
+        && tokens.iter().all(|token| {
+            token.len() == 3
+                && token.chars().all(|ch| matches!(ch, '0'..='7'))
+                && u16::from_str_radix(token, 8).is_ok_and(|byte| byte <= 0xff)
+        })
+}
+
+fn looks_like_decimal_byte_text(value: &str) -> bool {
+    let tokens = split_code_tokens(value);
+    tokens.len() >= 2
+        && tokens.iter().all(|token| {
+            token.chars().all(|ch| ch.is_ascii_digit())
+                && token.parse::<u16>().is_ok_and(|byte| byte <= 0xff)
+        })
+}
+
+fn looks_like_ascii_code_text(value: &str) -> bool {
+    let tokens = split_code_tokens(value);
+    tokens.len() >= 2
+        && tokens.iter().all(|token| {
+            token.chars().all(|ch| ch.is_ascii_digit())
+                && token
+                    .parse::<u32>()
+                    .is_ok_and(|codepoint| codepoint <= 0x10ffff)
+        })
+}
+
+fn looks_like_rot13_text(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    ["synt{", "pgs{", "uggc", "uryyb", "cnffjbeq", "nqzva"]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn looks_like_morse_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.len() >= 3
+        && trimmed.chars().any(|ch| matches!(ch, '.' | '-'))
+        && trimmed
+            .chars()
+            .all(|ch| matches!(ch, '.' | '-' | '/' | '|' | ' ' | '\n' | '\r' | '\t'))
+}
+
+fn split_code_tokens(value: &str) -> Vec<&str> {
+    value
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';' | '|'))
+        .filter(|token| !token.is_empty())
+        .collect()
 }
 
 fn format_auto_decode_candidates(candidates: &[AutoCandidate]) -> String {
@@ -1630,6 +1931,39 @@ mod tests {
         assert!(output.value.contains("Result:\nflag{test}"));
         assert!(output.value.contains("Steps: base64.decode"));
         assert!(!output.value.contains("\"candidates\""));
+    }
+
+    #[test]
+    fn auto_decode_finds_nested_base64_hex_flag() {
+        let response = auto_decode(
+            &dummy_spec(),
+            &request("auto.decode", "NjY2YzYxNjc3Yjc0NjU3Mzc0N2Q="),
+        )
+        .expect("auto decode");
+        let output = &response.outputs[0].value;
+        assert!(output.contains("Steps: base64.decode -> hex.decode"));
+        assert!(output.contains("Result:\nflag{test}"));
+    }
+
+    #[test]
+    fn auto_decode_finds_nested_url_base64_flag() {
+        let response = auto_decode(
+            &dummy_spec(),
+            &request("auto.decode", "ZmxhZ3t0ZXN0fQ%3D%3D"),
+        )
+        .expect("auto decode");
+        let output = &response.outputs[0].value;
+        assert!(output.contains("Steps: url.decode -> base64.decode"));
+        assert!(output.contains("Result:\nflag{test}"));
+    }
+
+    #[test]
+    fn auto_decode_handles_unpadded_base64() {
+        let response = auto_decode(&dummy_spec(), &request("auto.decode", "ZmxhZ3t0ZXN0fQ"))
+            .expect("auto decode");
+        let output = &response.outputs[0].value;
+        assert!(output.contains("Steps: base64.decode"));
+        assert!(output.contains("Result:\nflag{test}"));
     }
 
     #[test]
