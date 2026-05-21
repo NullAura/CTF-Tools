@@ -578,6 +578,24 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "rc4.apply"
+name_zh = "RC4 加解密"
+name_en = "RC4 Apply"
+category = "crypto.stream"
+aliases = ["rc4", "arc4", "arcfour", "rc4 decrypt", "rc4 encrypt"]
+input = ["text", "file"]
+output = ["text", "hex", "base64"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["key"]
+
+[[operations]]
 id = "xor.single_byte_bruteforce"
 name_zh = "单字节 XOR 爆破"
 name_en = "Single-byte XOR Bruteforce"
@@ -590,6 +608,24 @@ safety = "safe"
 deterministic = true
 batchable = true
 priority = "P1"
+
+[[operations]]
+id = "xor.repeating_key"
+name_zh = "重复密钥 XOR"
+name_en = "Repeating-key XOR"
+category = "crypto.xor"
+aliases = ["multi byte xor", "repeating xor", "xor key", "xor repeating"]
+input = ["text", "file"]
+output = ["text", "hex", "base64"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["key"]
 
 [[operations]]
 id = "radix.convert"
@@ -627,6 +663,70 @@ category = "crypto.classical"
 aliases = ["caesar", "凯撒", "shift cipher"]
 input = ["text", "file"]
 output = ["json", "ranked_text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "vigenere.encode"
+name_zh = "Vigenere 编码"
+name_en = "Vigenere Encode"
+category = "crypto.classical"
+aliases = ["vigenere", "维吉尼亚", "维吉尼亚编码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["key"]
+
+[[operations]]
+id = "vigenere.decode"
+name_zh = "Vigenere 解码"
+name_en = "Vigenere Decode"
+category = "crypto.classical"
+aliases = ["vigenere", "维吉尼亚", "维吉尼亚解码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[operations.secrets]
+redact_by_default = true
+fields = ["key"]
+
+[[operations]]
+id = "atbash.decode"
+name_zh = "Atbash"
+name_en = "Atbash"
+category = "crypto.classical"
+aliases = ["atbash", "埃特巴什"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "rot47.decode"
+name_zh = "ROT47"
+name_en = "ROT47"
+category = "crypto.classical"
+aliases = ["rot47"]
+input = ["text", "file"]
+output = ["text"]
 backend = "rust"
 safety = "safe"
 deterministic = true

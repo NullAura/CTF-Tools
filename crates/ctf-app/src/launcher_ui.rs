@@ -886,7 +886,9 @@ impl CtfToolsApp {
                                 );
                             });
                         })
-                        .response;
+                        .response
+                        .interact(egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
 
                     if response.clicked() {
                         self.launcher.select_tool(&tool.id);

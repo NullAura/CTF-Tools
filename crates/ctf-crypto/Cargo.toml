@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+base64.workspace = true
 ctf-core = { path = "../ctf-core" }
 hex.workspace = true
 md4.workspace = true

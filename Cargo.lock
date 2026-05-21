@@ -893,6 +893,7 @@ dependencies = [
 name = "ctf-crypto"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "ctf-core",
  "hex",
  "md-5",

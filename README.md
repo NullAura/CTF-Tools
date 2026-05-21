@@ -8,7 +8,7 @@ The desktop app uses English by default and includes a language setting for Chin
 
 - **Recipe-based operation chains**: Search tools in the Operations workspace, add them to a Recipe, reorder steps, and run multi-step encode/decode/transform workflows.
 - **Codecs and transforms**: Base64, Base32, Base45, Base58, Base62, Base85, URL, HTML, Unicode, ASCII, Hex, binary, octal, decimal, hexdump, endian swap, Morse, Brainfuck, and auto decode.
-- **Hashes and crypto helpers**: MD5, SHA1, SHA2, SHA3, NTLM, SM3, ROT13, Caesar brute force, and single-byte XOR brute force.
+- **Hashes and crypto helpers**: MD5, SHA1, SHA2, SHA3, NTLM, SM3, RC4, repeating-key XOR, ROT13, ROT47, Atbash, Vigenere, Caesar brute force, and single-byte XOR brute force.
 - **Web / HTTP / JWT**: Raw HTTP request parsing, Python `requests` / `httpx` code generation, curl and fetch generation, JWT decode, HS256 sign/verify, and weak-key checks.
 - **Asset classification**: Extract and group URLs, domains, IP addresses, CIDR-like ranges, emails, phone numbers, and ID-card-like values from mixed text.
 - **Files, stego, and traffic analysis**: Hex viewer, entropy analysis, image Data URI generation, GIF frame extraction, PCAP HTTP/DNS/ICMP/TCP summaries, and USB HID key parsing.
@@ -55,6 +55,12 @@ Run an operation:
 
 ```bash
 cargo run -p ctf-cli -- run base64.decode --text "ZmxhZ3t0ZXN0fQ=="
+```
+
+Keyed crypto operations such as RC4 and repeating-key XOR accept inline options:
+
+```bash
+cargo run -p ctf-cli -- run rc4.apply --text $'key=Key\ninput=hex\noutput=text\n\nbbf316e8d940af0ad3'
 ```
 
 Launcher commands:

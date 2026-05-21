@@ -1291,7 +1291,14 @@ impl CtfToolsApp {
                         },
                         |ui| self.render_operation_card(ui, op, selected),
                     );
-                    if drag_source.inner.clicked() {
+                    let click_response = ui
+                        .interact(
+                            drag_source.response.rect,
+                            egui::Id::new(("operation-click", &op.id)),
+                            egui::Sense::click(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if drag_source.inner.clicked() || click_response.clicked() {
                         self.selected_operation = Some(op.id.clone());
                         if !op.input.iter().any(|kind| kind == &self.input_kind) {
                             self.input_kind = op
@@ -1301,7 +1308,7 @@ impl CtfToolsApp {
                                 .unwrap_or_else(|| "text".to_string());
                         }
                     }
-                    if drag_source.inner.double_clicked() {
+                    if drag_source.inner.double_clicked() || click_response.double_clicked() {
                         operation_to_add = Some(op.id.clone());
                     }
                     ui.add_space(6.0);
@@ -1367,6 +1374,8 @@ impl CtfToolsApp {
                 });
             })
             .response
+            .interact(egui::Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 
     fn render_recipe_panel(&mut self, ui: &mut egui::Ui) {
@@ -1833,7 +1842,8 @@ fn category_sort_key(category: &str) -> usize {
         "program.esolang" => 16,
         "crypto.hash" => 20,
         "crypto.xor" => 21,
-        "crypto.classical" => 22,
+        "crypto.stream" => 22,
+        "crypto.classical" => 23,
         "web.http" => 30,
         "web.http.codegen" => 31,
         "web.token" => 32,
@@ -1883,6 +1893,8 @@ fn category_title(category: &str, language: Language) -> &str {
         ("crypto.classical", Language::Chinese) => "古典密码",
         ("crypto.hash", Language::English) => "Hashes",
         ("crypto.hash", Language::Chinese) => "哈希",
+        ("crypto.stream", Language::English) => "Stream Ciphers",
+        ("crypto.stream", Language::Chinese) => "流密码",
         ("crypto.xor", _) => "XOR",
         ("file.inspect", Language::English) => "File Inspection",
         ("file.inspect", Language::Chinese) => "文件检查",
