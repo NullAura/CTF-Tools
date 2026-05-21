@@ -117,6 +117,15 @@ pub enum CtfError {
     UnsupportedOperation(String),
     #[error("input kind `{kind}` is not accepted by operation `{operation}`")]
     InvalidInputKind { operation: String, kind: String },
+    #[error("failed to read input file at {path}: {source}")]
+    InputRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("input is not valid UTF-8")]
+    InvalidUtf8,
+    #[error("{0}")]
+    InvalidInput(String),
     #[error("operation output exceeds max_output_bytes ({limit})")]
     OutputLimitExceeded { limit: usize },
 }
@@ -226,6 +235,38 @@ impl OperationRunner {
     }
 }
 
+impl OperationRequest {
+    pub fn input_bytes(&self) -> Result<Vec<u8>> {
+        match self.input.kind.as_str() {
+            "text" | "bytes" => Ok(self.input.value.as_bytes().to_vec()),
+            "file" => {
+                let path = PathBuf::from(&self.input.value);
+                fs::read(&path).map_err(|source| CtfError::InputRead { path, source })
+            }
+            _ => Err(CtfError::InvalidInputKind {
+                operation: self.operation.clone(),
+                kind: self.input.kind.clone(),
+            }),
+        }
+    }
+
+    pub fn input_text(&self) -> Result<String> {
+        match self.input.kind.as_str() {
+            "text" => Ok(self.input.value.clone()),
+            "bytes" => String::from_utf8(self.input.value.as_bytes().to_vec())
+                .map_err(|_| CtfError::InvalidUtf8),
+            "file" => {
+                let path = PathBuf::from(&self.input.value);
+                fs::read_to_string(&path).map_err(|source| CtfError::InputRead { path, source })
+            }
+            _ => Err(CtfError::InvalidInputKind {
+                operation: self.operation.clone(),
+                kind: self.input.kind.clone(),
+            }),
+        }
+    }
+}
+
 pub fn error_report(error: &CtfError) -> ErrorReport {
     match error {
         CtfError::RegistryRead { .. } => ErrorReport {
@@ -246,6 +287,18 @@ pub fn error_report(error: &CtfError) -> ErrorReport {
         },
         CtfError::InvalidInputKind { .. } => ErrorReport {
             code: "invalid_input_kind".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::InputRead { .. } => ErrorReport {
+            code: "input_read".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::InvalidUtf8 => ErrorReport {
+            code: "invalid_utf8".to_string(),
+            message: error.to_string(),
+        },
+        CtfError::InvalidInput(_) => ErrorReport {
+            code: "invalid_input".to_string(),
             message: error.to_string(),
         },
         CtfError::OutputLimitExceeded { .. } => ErrorReport {

@@ -46,12 +46,152 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "base32.decode"
+name_zh = "Base32 解码"
+name_en = "Base32 Decode"
+category = "codecs.base"
+aliases = ["b32", "base32decode", "base32解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "base32.encode"
+name_zh = "Base32 编码"
+name_en = "Base32 Encode"
+category = "codecs.base"
+aliases = ["b32", "base32encode", "base32编码"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
 id = "url.encode"
 name_zh = "URL 编码"
 name_en = "URL Encode"
 category = "codecs.web"
 aliases = ["urlencode", "percent encode", "url编码"]
 input = ["text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "html.decode"
+name_zh = "HTML 实体解码"
+name_en = "HTML Entity Decode"
+category = "codecs.web"
+aliases = ["htmldecode", "html解码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "html.encode"
+name_zh = "HTML 实体编码"
+name_en = "HTML Entity Encode"
+category = "codecs.web"
+aliases = ["htmlencode", "html编码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "unicode.decode"
+name_zh = "Unicode 解码"
+name_en = "Unicode Escape Decode"
+category = "codecs.text"
+aliases = ["unicode decode", "unicode解码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "unicode.encode"
+name_zh = "Unicode 编码"
+name_en = "Unicode Escape Encode"
+category = "codecs.text"
+aliases = ["unicode encode", "unicode编码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "ascii.decode"
+name_zh = "ASCII 解码"
+name_en = "ASCII Decode"
+category = "codecs.text"
+aliases = ["ascii to text", "ascii解码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "ascii.encode"
+name_zh = "ASCII 编码"
+name_en = "ASCII Encode"
+category = "codecs.text"
+aliases = ["text to ascii", "ascii编码"]
+input = ["text", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hex.decode"
+name_zh = "Hex 解码"
+name_en = "Hex Decode"
+category = "codecs.binary"
+aliases = ["hex to text", "十六进制解码"]
+input = ["text", "file"]
+output = ["text", "bytes"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hex.encode"
+name_zh = "Hex 编码"
+name_en = "Hex Encode"
+category = "codecs.binary"
+aliases = ["text to hex", "十六进制编码"]
+input = ["text", "bytes", "file"]
 output = ["text"]
 backend = "rust"
 safety = "safe"
@@ -74,11 +214,81 @@ batchable = true
 priority = "P0"
 
 [[operations]]
+id = "hash.sha1"
+name_zh = "SHA1"
+name_en = "SHA1"
+category = "crypto.hash"
+aliases = ["sha-1", "sha1sum"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
 id = "hash.sha256"
 name_zh = "SHA256"
 name_en = "SHA256"
 category = "crypto.hash"
 aliases = ["sha2", "sha-256", "sha256sum"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hash.sha512"
+name_zh = "SHA512"
+name_en = "SHA512"
+category = "crypto.hash"
+aliases = ["sha-512", "sha512sum"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hash.sha3_256"
+name_zh = "SHA3-256"
+name_en = "SHA3-256"
+category = "crypto.hash"
+aliases = ["sha3", "sha3-256"]
+input = ["text", "bytes", "file"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hash.ntlm"
+name_zh = "NTLM"
+name_en = "NTLM"
+category = "crypto.hash"
+aliases = ["nt hash", "nthash"]
+input = ["text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P0"
+
+[[operations]]
+id = "hash.sm3"
+name_zh = "SM3"
+name_en = "SM3"
+category = "crypto.hash"
+aliases = ["国密sm3"]
 input = ["text", "bytes", "file"]
 output = ["text"]
 backend = "rust"
@@ -200,4 +410,3 @@ safety = "local_only"
 deterministic = true
 batchable = true
 priority = "P2"
-
