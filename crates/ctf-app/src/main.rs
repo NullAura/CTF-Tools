@@ -50,6 +50,8 @@ struct CtfToolsApp {
     selected_operation: Option<String>,
     input: String,
     output: String,
+    warnings: Vec<String>,
+    last_status: String,
 }
 
 impl CtfToolsApp {
@@ -66,16 +68,82 @@ impl CtfToolsApp {
             selected_operation,
             input: "ZmxhZ3t0ZXN0fQ==".to_string(),
             output: String::new(),
+            warnings: Vec::new(),
+            last_status: "Ready".to_string(),
+        }
+    }
+
+    fn run_selected(&mut self) {
+        let (Some(registry), Some(operation)) =
+            (self.registry.clone(), self.selected_operation.clone())
+        else {
+            self.output = "No operation selected".to_string();
+            self.last_status = "Error".to_string();
+            return;
+        };
+
+        let runner = ctf_runner::default_runner()
+            .unwrap_or_else(|_| ctf_core::OperationRunner::new(registry));
+        let result = runner.run(OperationRequest {
+            operation,
+            input: OperationInput {
+                kind: "text".to_string(),
+                value: self.input.clone(),
+            },
+            limits: TaskLimits::default(),
+        });
+
+        match result {
+            Ok(response) => {
+                self.output = response
+                    .outputs
+                    .iter()
+                    .map(|output| output.value.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                self.warnings = response.warnings;
+                self.last_status = "OK".to_string();
+            }
+            Err(error) => {
+                self.output = error.to_string();
+                self.warnings.clear();
+                self.last_status = "Error".to_string();
+            }
         }
     }
 }
 
 impl eframe::App for CtfToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let selected_spec = self.registry.as_ref().and_then(|registry| {
+            self.selected_operation
+                .as_deref()
+                .and_then(|id| registry.find(id))
+                .cloned()
+        });
+
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading("CTF Tools");
+                ui.separator();
                 ui.label("Rust + Python");
+                if let Some(registry) = &self.registry {
+                    ui.separator();
+                    ui.label(format!("{} operations", registry.operations().len()));
+                }
+            });
+        });
+
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("Status: {}", self.last_status));
+                if let Some(spec) = &selected_spec {
+                    ui.separator();
+                    ui.label(format!(
+                        "{} · {} · {}",
+                        spec.category, spec.backend, spec.safety
+                    ));
+                }
             });
         });
 
@@ -111,10 +179,12 @@ impl eframe::App for CtfToolsApp {
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading("输入");
-                if let Some(op) = &self.selected_operation {
-                    ui.label(op);
+                if let Some(spec) = &selected_spec {
+                    ui.label(&spec.id);
+                    ui.label(format!("input: {}", spec.input.join("/")));
+                    ui.label(format!("output: {}", spec.output.join("/")));
                 }
             });
             ui.add(
@@ -123,29 +193,24 @@ impl eframe::App for CtfToolsApp {
                     .desired_width(f32::INFINITY),
             );
 
-            if ui.button("执行").clicked()
-                && let (Some(registry), Some(operation)) =
-                    (self.registry.clone(), self.selected_operation.clone())
-            {
-                let runner = ctf_runner::default_runner()
-                    .unwrap_or_else(|_| ctf_core::OperationRunner::new(registry));
-                let result = runner.run(OperationRequest {
-                    operation,
-                    input: OperationInput {
-                        kind: "text".to_string(),
-                        value: self.input.clone(),
-                    },
-                    limits: TaskLimits::default(),
-                });
-                self.output = match result {
-                    Ok(response) => response
-                        .outputs
-                        .iter()
-                        .map(|output| output.value.clone())
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    Err(error) => error.to_string(),
-                };
+            ui.horizontal(|ui| {
+                if ui.button("执行").clicked() {
+                    self.run_selected();
+                }
+                if ui.button("清空输入").clicked() {
+                    self.input.clear();
+                }
+                if ui.button("复制结果").clicked() && !self.output.is_empty() {
+                    ctx.copy_text(self.output.clone());
+                    self.last_status = "Copied".to_string();
+                }
+            });
+
+            if !self.warnings.is_empty() {
+                ui.separator();
+                for warning in &self.warnings {
+                    ui.colored_label(egui::Color32::YELLOW, warning);
+                }
             }
 
             ui.separator();
