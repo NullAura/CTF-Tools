@@ -462,6 +462,62 @@ batchable = true
 priority = "P2"
 
 [[operations]]
+id = "pcap.dns.extract"
+name_zh = "PCAP DNS 提取"
+name_en = "Extract DNS from PCAP"
+category = "forensics.pcap"
+aliases = ["dns extract", "dns queries", "dns提取"]
+input = ["file"]
+output = ["json"]
+backend = "rust"
+safety = "local_only"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
+id = "pcap.icmp.extract"
+name_zh = "PCAP ICMP 提取"
+name_en = "Extract ICMP from PCAP"
+category = "forensics.pcap"
+aliases = ["icmp extract", "icmp提取"]
+input = ["file"]
+output = ["json"]
+backend = "rust"
+safety = "local_only"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
+id = "pcap.tcp.summary"
+name_zh = "PCAP TCP 流摘要"
+name_en = "PCAP TCP Flow Summary"
+category = "forensics.pcap"
+aliases = ["tcp streams", "tcp summary", "tcp流"]
+input = ["file"]
+output = ["json"]
+backend = "rust"
+safety = "local_only"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
+id = "usb.hid.keys"
+name_zh = "USB HID 键盘解析"
+name_en = "USB HID Keyboard Decode"
+category = "forensics.usb"
+aliases = ["hid keyboard", "usb keyboard", "hid解析"]
+input = ["text", "bytes", "file"]
+output = ["json", "text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P2"
+
+[[operations]]
 id = "file.hex_view"
 name_zh = "Hex Viewer"
 name_en = "Hex Viewer"
@@ -482,6 +538,48 @@ name_en = "File Entropy"
 category = "file.inspect"
 aliases = ["entropy", "熵值"]
 input = ["text", "bytes", "file"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "file.entropy_map"
+name_zh = "文件熵图"
+name_en = "File Entropy Map"
+category = "file.inspect"
+aliases = ["entropy map", "熵图", "分块熵"]
+input = ["text", "bytes", "file"]
+output = ["json"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "image.base64.data_uri"
+name_zh = "图片 Base64 Data URI"
+name_en = "Image Base64 Data URI"
+category = "forensics.image"
+aliases = ["image base64", "data uri", "图片base64"]
+input = ["bytes", "file", "text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
+id = "image.gif.frames"
+name_zh = "GIF 分帧信息"
+name_en = "GIF Frame Metadata"
+category = "forensics.image"
+aliases = ["gif frames", "gif分帧"]
+input = ["bytes", "file", "text"]
 output = ["json"]
 backend = "rust"
 safety = "safe"
