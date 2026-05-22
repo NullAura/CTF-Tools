@@ -1106,6 +1106,20 @@ batchable = true
 priority = "P1"
 
 [[operations]]
+id = "image.stego.scan"
+name_zh = "图片隐写自动扫描"
+name_en = "Auto Image Stego Scan"
+category = "forensics.image"
+aliases = ["auto stego", "image stego", "zsteg", "stegsolve", "图片隐写", "隐写自动识别"]
+input = ["bytes", "file", "text"]
+output = ["text"]
+backend = "rust"
+safety = "safe"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "binary.info"
 name_zh = "二进制信息"
 name_en = "Binary Info"

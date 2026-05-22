@@ -15,6 +15,21 @@ const BASE62_ALPHABET: &[u8; 62] =
 const AUTO_DECODE_MAX_DEPTH: usize = 5;
 const AUTO_DECODE_BEAM_WIDTH: usize = 64;
 const AUTO_DECODE_MAX_VALUE_LEN: usize = 128 * 1024;
+const CTF_SIGNAL_KEYWORDS: &[&str] = &[
+    "flag", "ctf", "key", "secret", "token", "password", "passwd", "admin", "root", "shell",
+    "upload", "select", "union", "sqlite", "mysql", "crypto", "cipher", "xor", "pwn", "reverse",
+    "web", "misc", "forensic",
+];
+const CTF_CONTEXT_KEYWORDS: &[&str] = &[
+    "http://",
+    "https://",
+    "eyj",
+    "{\"",
+    "<?php",
+    "<script",
+    "username",
+    "authorization",
+];
 
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("base64.decode", base64_decode);
@@ -1541,17 +1556,57 @@ fn score_text(value: &str) -> f32 {
     if lower.contains("flag{") || lower.contains("ctf{") {
         score += 2.0;
     }
-    for marker in [
-        "flag", "ctf", "key{", "http://", "https://", "password", "admin",
-    ] {
+    score += ctf_keyword_score(&lower);
+    score += brace_pattern_score(value);
+    for marker in CTF_CONTEXT_KEYWORDS {
         if lower.contains(marker) {
-            score += 0.25;
+            score += 0.2;
         }
     }
     if looks_like_encoded_blob(value) {
         score -= 0.15;
     }
     score
+}
+
+fn ctf_keyword_score(lower: &str) -> f32 {
+    let hits = CTF_SIGNAL_KEYWORDS
+        .iter()
+        .filter(|keyword| lower.contains(**keyword))
+        .count();
+    (hits as f32 * 0.18).min(1.2)
+}
+
+fn brace_pattern_score(value: &str) -> f32 {
+    let mut score: f32 = 0.0;
+    for (open, close) in [('{', '}'), ('[', ']'), ('(', ')')] {
+        if let Some(candidate) = first_wrapped_payload(value, open, close) {
+            score = score.max(if candidate_has_ctf_shape(candidate) {
+                1.0
+            } else {
+                0.45
+            });
+        }
+    }
+    score
+}
+
+fn first_wrapped_payload(value: &str, open: char, close: char) -> Option<&str> {
+    let start = value.find(open)?;
+    let tail = &value[start + open.len_utf8()..];
+    let end = tail.find(close)?;
+    let payload = &tail[..end];
+    if (3..=128).contains(&payload.chars().count()) {
+        Some(payload)
+    } else {
+        None
+    }
+}
+
+fn candidate_has_ctf_shape(value: &str) -> bool {
+    value.chars().all(|ch| {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '@' | '/' | '=' | '+')
+    })
 }
 
 fn looks_like_encoded_blob(value: &str) -> bool {
@@ -1964,6 +2019,14 @@ mod tests {
         let output = &response.outputs[0].value;
         assert!(output.contains("Steps: base64.decode"));
         assert!(output.contains("Result:\nflag{test}"));
+    }
+
+    #[test]
+    fn auto_decode_scores_braced_ctf_payloads() {
+        let response = auto_decode(&dummy_spec(), &request("auto.decode", "eHl6e2FiY19rZXl9"))
+            .expect("auto decode");
+        let output = &response.outputs[0].value;
+        assert!(output.contains("Result:\nxyz{abc_key}"));
     }
 
     #[test]

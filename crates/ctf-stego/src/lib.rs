@@ -7,12 +7,32 @@ use ctf_core::{
 };
 use regex::Regex;
 
+const CTF_STEGO_KEYWORDS: &[&str] = &[
+    "flag", "ctf", "key", "secret", "token", "password", "passwd", "admin", "shell", "root",
+    "upload", "crypto", "pwn", "reverse", "forensic",
+];
+const FILE_SIGNATURES: &[(&str, &[u8])] = &[
+    ("zip", b"PK\x03\x04"),
+    ("zip-empty", b"PK\x05\x06"),
+    ("png", b"\x89PNG\r\n\x1a\n"),
+    ("jpeg", b"\xff\xd8\xff"),
+    ("gif87a", b"GIF87a"),
+    ("gif89a", b"GIF89a"),
+    ("pdf", b"%PDF-"),
+    ("7z", b"7z\xbc\xaf\x27\x1c"),
+    ("rar", b"Rar!\x1a\x07"),
+    ("gzip", b"\x1f\x8b"),
+    ("elf", b"\x7fELF"),
+    ("pe", b"MZ"),
+];
+
 pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("file.hex_view", file_hex_view);
     runner.register_handler("file.entropy", file_entropy);
     runner.register_handler("file.entropy_map", file_entropy_map);
     runner.register_handler("image.base64.data_uri", image_base64_data_uri);
     runner.register_handler("image.gif.frames", image_gif_frames);
+    runner.register_handler("image.stego.scan", image_stego_scan);
     runner.register_handler("pcap.http.extract", pcap_http_extract);
     runner.register_handler("pcap.dns.extract", pcap_dns_extract);
     runner.register_handler("pcap.icmp.extract", pcap_icmp_extract);
@@ -90,6 +110,18 @@ fn image_gif_frames(
             "frames": frames,
         }),
     )
+}
+
+fn image_stego_scan(
+    _spec: &OperationSpec,
+    request: &OperationRequest,
+) -> Result<OperationResponse> {
+    let bytes = request.input_bytes()?;
+    Ok(single_output(
+        "text",
+        "stego-scan",
+        format_stego_scan(&bytes),
+    ))
 }
 
 fn pcap_http_extract(
@@ -287,6 +319,259 @@ fn image_mime(bytes: &[u8]) -> &'static str {
     }
 }
 
+fn format_stego_scan(bytes: &[u8]) -> String {
+    let mut findings = Vec::new();
+    let mut hints = Vec::new();
+    let file_type = stego_file_type(bytes);
+    let entropy = shannon_entropy(bytes);
+
+    if bytes.is_empty() {
+        return "Auto Image Stego Scan\nNo bytes provided.".to_string();
+    }
+
+    if entropy > 7.5 {
+        findings.push(format!(
+            "[medium] High entropy ({entropy:.3}); payload may be compressed, encrypted, or packed."
+        ));
+    }
+
+    scan_ctf_strings(bytes, &mut findings);
+    scan_embedded_signatures(bytes, &mut findings);
+    scan_appended_data(bytes, file_type, &mut findings);
+
+    match file_type {
+        "PNG" => {
+            scan_png_chunks(bytes, &mut findings);
+            hints
+                .push("PNG/BMP LSB: try zsteg-style channel and bit-plane extraction.".to_string());
+            hints.push("Visual: inspect RGB/alpha bit planes and color channels.".to_string());
+        }
+        "JPEG" => {
+            scan_jpeg_metadata(bytes, &mut findings);
+            hints.push(
+                "JPEG: check comments/EXIF, then steghide info/extract or stegseek if passworded."
+                    .to_string(),
+            );
+        }
+        "GIF" => {
+            scan_gif_metadata(bytes, &mut findings);
+            hints.push(
+                "GIF: inspect frame count, delays, disposal, and per-frame differences."
+                    .to_string(),
+            );
+        }
+        "BMP" => {
+            scan_bmp_lsb(bytes, &mut findings);
+            hints.push(
+                "BMP: raw pixel LSB extraction is high-value; inspect RGB bit planes.".to_string(),
+            );
+        }
+        _ => hints.push(
+            "Unknown or non-image input: inspect file signatures, strings, and entropy first."
+                .to_string(),
+        ),
+    }
+
+    if findings.is_empty() {
+        findings.push("[info] No obvious flag strings, appended payload, metadata text, or nested file signature found.".to_string());
+    }
+
+    let mut report = format!(
+        "Auto Image Stego Scan\nType: {file_type}\nMIME: {}\nSize: {} bytes\nEntropy: {entropy:.3}\n\nFindings:\n",
+        image_mime(bytes),
+        bytes.len()
+    );
+    for finding in findings {
+        report.push_str("- ");
+        report.push_str(&finding);
+        report.push('\n');
+    }
+    report.push_str("\nNext checks:\n");
+    for hint in hints {
+        report.push_str("- ");
+        report.push_str(&hint);
+        report.push('\n');
+    }
+    report
+}
+
+fn stego_file_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "PNG"
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        "JPEG"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "GIF"
+    } else if bytes.starts_with(b"BM") {
+        "BMP"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP".as_slice()) {
+        "WEBP"
+    } else {
+        "unknown"
+    }
+}
+
+fn scan_ctf_strings(bytes: &[u8], findings: &mut Vec<String>) {
+    let strings = extract_printable_strings(bytes, 4, 64);
+    let mut ctf_hits = Vec::new();
+    for item in &strings {
+        let lower = item.to_ascii_lowercase();
+        if CTF_STEGO_KEYWORDS
+            .iter()
+            .any(|keyword| lower.contains(keyword))
+            || has_wrapped_payload(item)
+        {
+            ctf_hits.push(preview_text(item, 96));
+        }
+    }
+    for hit in ctf_hits.into_iter().take(6) {
+        findings.push(format!("[high] CTF-looking string: {hit}"));
+    }
+    if !strings.is_empty() {
+        findings.push(format!(
+            "[info] {} printable strings found; inspect strings output if the obvious path fails.",
+            strings.len()
+        ));
+    }
+}
+
+fn scan_embedded_signatures(bytes: &[u8], findings: &mut Vec<String>) {
+    for (name, signature) in FILE_SIGNATURES {
+        for offset in find_all_subsequences(bytes, signature)
+            .into_iter()
+            .filter(|offset| *offset > 0)
+        {
+            findings.push(format!(
+                "[medium] Nested {name} signature at offset 0x{offset:08x}; try binwalk-style extraction."
+            ));
+        }
+    }
+}
+
+fn scan_appended_data(bytes: &[u8], file_type: &str, findings: &mut Vec<String>) {
+    let end = match file_type {
+        "PNG" => png_iend_end(bytes),
+        "JPEG" => jpeg_eoi_end(bytes),
+        "GIF" => bytes
+            .iter()
+            .rposition(|byte| *byte == 0x3b)
+            .map(|offset| offset + 1),
+        "BMP" => bmp_declared_size(bytes),
+        _ => None,
+    };
+    let Some(end) = end else {
+        return;
+    };
+    if end < bytes.len() {
+        let tail = &bytes[end..];
+        findings.push(format!(
+            "[high] {} trailing bytes after {file_type} logical end at offset 0x{end:08x}. Preview: {}",
+            tail.len(),
+            preview_bytes(tail, 80)
+        ));
+    }
+}
+
+fn scan_png_chunks(bytes: &[u8], findings: &mut Vec<String>) {
+    let chunks = parse_png_chunk_summary(bytes);
+    if chunks.is_empty() {
+        findings.push(
+            "[medium] PNG signature detected but chunk table is incomplete or corrupt.".to_string(),
+        );
+        return;
+    }
+    let idat_count = chunks.iter().filter(|chunk| chunk.kind == "IDAT").count();
+    let chunk_list = chunks
+        .iter()
+        .map(|chunk| format!("{}@0x{:x}/{}", chunk.kind, chunk.offset, chunk.length))
+        .collect::<Vec<_>>()
+        .join(", ");
+    findings.push(format!("[info] PNG chunks: {chunk_list}"));
+    if idat_count > 1 {
+        findings.push(format!(
+            "[info] PNG has {idat_count} IDAT chunks; compare chunk boundaries if data is suspicious."
+        ));
+    }
+    for chunk in chunks
+        .iter()
+        .filter(|chunk| matches!(chunk.kind.as_str(), "tEXt" | "iTXt" | "zTXt" | "eXIf"))
+    {
+        if let Some(data) = bytes.get(chunk.data_offset..chunk.data_offset + chunk.length) {
+            findings.push(format!(
+                "[high] PNG {} metadata at offset 0x{:08x}: {}",
+                chunk.kind,
+                chunk.offset,
+                preview_bytes(data, 120)
+            ));
+        }
+    }
+}
+
+fn scan_jpeg_metadata(bytes: &[u8], findings: &mut Vec<String>) {
+    let mut offset = 2usize;
+    while offset + 4 <= bytes.len() {
+        if bytes[offset] != 0xff {
+            offset += 1;
+            continue;
+        }
+        let marker = bytes[offset + 1];
+        if marker == 0xd9 || marker == 0xda {
+            break;
+        }
+        let length = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        if length < 2 || offset + 2 + length > bytes.len() {
+            break;
+        }
+        let data = &bytes[offset + 4..offset + 2 + length];
+        match marker {
+            0xfe => findings.push(format!(
+                "[high] JPEG comment at offset 0x{offset:08x}: {}",
+                preview_bytes(data, 120)
+            )),
+            0xe1 => findings.push(format!(
+                "[info] JPEG EXIF/App1 segment at offset 0x{offset:08x}: {}",
+                preview_bytes(data, 80)
+            )),
+            _ => {}
+        }
+        offset += 2 + length;
+    }
+}
+
+fn scan_gif_metadata(bytes: &[u8], findings: &mut Vec<String>) {
+    if let Ok(frames) = parse_gif_frames(bytes) {
+        findings.push(format!("[info] GIF frame count: {}", frames.len()));
+        if frames.len() > 1 {
+            findings.push(
+                "[medium] Multi-frame GIF; inspect per-frame differences and delays.".to_string(),
+            );
+        }
+    }
+}
+
+fn scan_bmp_lsb(bytes: &[u8], findings: &mut Vec<String>) {
+    let Some(pixel_offset) = bmp_pixel_offset(bytes) else {
+        return;
+    };
+    if pixel_offset >= bytes.len() {
+        return;
+    }
+    for order in [BitOrder::MsbFirst, BitOrder::LsbFirst] {
+        let decoded = decode_lsb_text(&bytes[pixel_offset..], order);
+        let lower = decoded.to_ascii_lowercase();
+        if CTF_STEGO_KEYWORDS
+            .iter()
+            .any(|keyword| lower.contains(keyword))
+            || has_wrapped_payload(&decoded)
+        {
+            findings.push(format!(
+                "[high] BMP byte-LSB text candidate ({order:?}): {}",
+                preview_text(&decoded, 120)
+            ));
+        }
+    }
+}
+
 fn parse_gif_frames(bytes: &[u8]) -> Result<Vec<serde_json::Value>> {
     if !(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")) || bytes.len() < 13 {
         return Err(CtfError::InvalidInput(
@@ -389,6 +674,190 @@ fn shannon_entropy(bytes: &[u8]) -> f64 {
             -p * p.log2()
         })
         .sum()
+}
+
+#[derive(Debug, Clone)]
+struct PngChunkSummary {
+    kind: String,
+    offset: usize,
+    data_offset: usize,
+    length: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BitOrder {
+    MsbFirst,
+    LsbFirst,
+}
+
+fn parse_png_chunk_summary(bytes: &[u8]) -> Vec<PngChunkSummary> {
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Vec::new();
+    }
+    let mut chunks = Vec::new();
+    let mut offset = 8usize;
+    while offset + 12 <= bytes.len() {
+        let length = u32::from_be_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]) as usize;
+        let kind_bytes = &bytes[offset + 4..offset + 8];
+        let kind = String::from_utf8_lossy(kind_bytes).to_string();
+        let data_offset = offset + 8;
+        let next = data_offset.saturating_add(length).saturating_add(4);
+        if next > bytes.len() {
+            break;
+        }
+        chunks.push(PngChunkSummary {
+            kind: kind.clone(),
+            offset,
+            data_offset,
+            length,
+        });
+        offset = next;
+        if kind == "IEND" {
+            break;
+        }
+    }
+    chunks
+}
+
+fn png_iend_end(bytes: &[u8]) -> Option<usize> {
+    parse_png_chunk_summary(bytes)
+        .into_iter()
+        .find(|chunk| chunk.kind == "IEND")
+        .map(|chunk| chunk.data_offset + chunk.length + 4)
+}
+
+fn jpeg_eoi_end(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(2)
+        .rposition(|window| window == [0xff, 0xd9])
+        .map(|offset| offset + 2)
+}
+
+fn bmp_declared_size(bytes: &[u8]) -> Option<usize> {
+    if !bytes.starts_with(b"BM") || bytes.len() < 6 {
+        return None;
+    }
+    let size = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
+    (size >= 14).then_some(size)
+}
+
+fn bmp_pixel_offset(bytes: &[u8]) -> Option<usize> {
+    if !bytes.starts_with(b"BM") || bytes.len() < 14 {
+        return None;
+    }
+    Some(u32::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]) as usize)
+}
+
+fn find_all_subsequences(bytes: &[u8], needle: &[u8]) -> Vec<usize> {
+    if needle.is_empty() || needle.len() > bytes.len() {
+        return Vec::new();
+    }
+    bytes
+        .windows(needle.len())
+        .enumerate()
+        .filter_map(|(offset, window)| (window == needle).then_some(offset))
+        .collect()
+}
+
+fn extract_printable_strings(bytes: &[u8], min_len: usize, max_count: usize) -> Vec<String> {
+    let mut strings = Vec::new();
+    let mut current = Vec::new();
+    for byte in bytes {
+        if byte.is_ascii_graphic() || *byte == b' ' {
+            current.push(*byte);
+        } else {
+            push_printable_string(&mut strings, &mut current, min_len, max_count);
+        }
+        if strings.len() >= max_count {
+            break;
+        }
+    }
+    push_printable_string(&mut strings, &mut current, min_len, max_count);
+    strings
+}
+
+fn push_printable_string(
+    strings: &mut Vec<String>,
+    current: &mut Vec<u8>,
+    min_len: usize,
+    max_count: usize,
+) {
+    if current.len() >= min_len && strings.len() < max_count {
+        strings.push(String::from_utf8_lossy(current).to_string());
+    }
+    current.clear();
+}
+
+fn has_wrapped_payload(value: &str) -> bool {
+    [('{', '}'), ('[', ']'), ('(', ')')]
+        .iter()
+        .any(|(open, close)| {
+            let Some(start) = value.find(*open) else {
+                return false;
+            };
+            let Some(end) = value[start + open.len_utf8()..].find(*close) else {
+                return false;
+            };
+            (3..=128).contains(&end)
+        })
+}
+
+fn decode_lsb_text(bytes: &[u8], order: BitOrder) -> String {
+    let mut out = Vec::new();
+    for chunk in bytes.chunks(8).take(512) {
+        if chunk.len() != 8 {
+            break;
+        }
+        let mut value = 0u8;
+        for (index, byte) in chunk.iter().enumerate() {
+            let bit = byte & 1;
+            match order {
+                BitOrder::MsbFirst => value |= bit << (7 - index),
+                BitOrder::LsbFirst => value |= bit << index,
+            }
+        }
+        if value.is_ascii_graphic() || value.is_ascii_whitespace() {
+            out.push(value);
+        } else if !out.is_empty() {
+            out.push(b'.');
+        }
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn preview_bytes(bytes: &[u8], limit: usize) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(bytes);
+    if text
+        .chars()
+        .filter(|ch| !ch.is_control() || ch.is_ascii_whitespace())
+        .count()
+        * 100
+        >= text.chars().count().max(1) * 80
+    {
+        preview_text(&text, limit)
+    } else {
+        hex::encode(&bytes[..bytes.len().min((limit / 2).max(1))])
+    }
+}
+
+fn preview_text(value: &str, limit: usize) -> String {
+    let mut out = String::new();
+    for (index, ch) in value.replace(['\r', '\n'], " ").chars().enumerate() {
+        if index >= limit {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -749,6 +1218,25 @@ mod tests {
         let gif = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
         let frames = parse_gif_frames(gif).expect("gif frames");
         assert_eq!(frames.len(), 1);
+    }
+
+    #[test]
+    fn auto_stego_scan_detects_png_tail_and_nested_signature() {
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IEND\xaeB`\x82PK\x03\x04flag{hidden}";
+        let report = format_stego_scan(png);
+        assert!(report.contains("Type: PNG"));
+        assert!(report.contains("trailing bytes"));
+        assert!(report.contains("Nested zip signature"));
+        assert!(report.contains("flag{hidden}"));
+    }
+
+    #[test]
+    fn auto_stego_scan_detects_jpeg_comment() {
+        let jpeg = b"\xff\xd8\xff\xfe\x00\x0fflag{comment}\xff\xd9";
+        let report = format_stego_scan(jpeg);
+        assert!(report.contains("Type: JPEG"));
+        assert!(report.contains("JPEG comment"));
+        assert!(report.contains("flag{comment}"));
     }
 
     #[test]
