@@ -966,6 +966,20 @@ batchable = true
 priority = "P1"
 
 [[operations]]
+id = "pcap.analyze"
+name_zh = "PCAP 流量分析"
+name_en = "Analyze PCAP Traffic"
+category = "forensics.pcap"
+aliases = ["pcap analysis", "traffic analysis", "flow analysis", "流量分析", "pcap分析"]
+input = ["file"]
+output = ["json", "text"]
+backend = "rust"
+safety = "local_only"
+deterministic = true
+batchable = true
+priority = "P1"
+
+[[operations]]
 id = "pcap.http.extract"
 name_zh = "PCAP HTTP 提取"
 name_en = "Extract HTTP from PCAP"

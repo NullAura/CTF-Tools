@@ -6,6 +6,7 @@ use ctf_core::{
     Result,
 };
 use regex::Regex;
+use std::collections::BTreeMap;
 
 const CTF_STEGO_KEYWORDS: &[&str] = &[
     "flag", "ctf", "key", "secret", "token", "password", "passwd", "admin", "shell", "root",
@@ -33,6 +34,7 @@ pub fn register_handlers(runner: &mut OperationRunner) {
     runner.register_handler("image.base64.data_uri", image_base64_data_uri);
     runner.register_handler("image.gif.frames", image_gif_frames);
     runner.register_handler("image.stego.scan", image_stego_scan);
+    runner.register_handler("pcap.analyze", pcap_analyze);
     runner.register_handler("pcap.http.extract", pcap_http_extract);
     runner.register_handler("pcap.dns.extract", pcap_dns_extract);
     runner.register_handler("pcap.icmp.extract", pcap_icmp_extract);
@@ -122,6 +124,12 @@ fn image_stego_scan(
         "stego-scan",
         format_stego_scan(&bytes),
     ))
+}
+
+fn pcap_analyze(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
+    let bytes = request.input_bytes()?;
+    let packets = parse_pcap_packets(&bytes)?;
+    json_output("pcap-analysis", analyze_pcap(&bytes, &packets))
 }
 
 fn pcap_http_extract(
@@ -253,6 +261,346 @@ fn pcap_tcp_summary(
         })
         .collect::<Vec<_>>();
     json_output("pcap-tcp", serde_json::json!({ "flows": flows }))
+}
+
+fn analyze_pcap(bytes: &[u8], packets: &[PcapPacket]) -> serde_json::Value {
+    let mut protocol_counts = BTreeMap::<String, usize>::new();
+    let mut endpoints = BTreeMap::<String, EndpointStats>::new();
+    let mut flows = BTreeMap::<String, PcapFlowStats>::new();
+    let mut http_items = Vec::new();
+    let mut dns_queries = Vec::new();
+    let mut icmp_messages = Vec::new();
+    let mut interesting_strings = Vec::new();
+    let mut embedded_signatures = Vec::new();
+    let mut tcp_payload_bytes = 0usize;
+    let mut udp_payload_bytes = 0usize;
+
+    for packet in packets {
+        let Some(ipv4) = parse_ipv4_payload(&packet.data, packet.linktype) else {
+            bump_count(&mut protocol_counts, "non_ipv4");
+            continue;
+        };
+        bump_count(&mut protocol_counts, "ipv4");
+        track_endpoint(&mut endpoints, &ipv4.src, true, packet.data.len());
+        track_endpoint(&mut endpoints, &ipv4.dst, false, packet.data.len());
+
+        match ipv4.protocol {
+            1 => {
+                bump_count(&mut protocol_counts, "icmp");
+                if ipv4.payload.len() >= 2 {
+                    icmp_messages.push(serde_json::json!({
+                        "packet": packet.index,
+                        "src": ipv4.src,
+                        "dst": ipv4.dst,
+                        "type": ipv4.payload[0],
+                        "code": ipv4.payload[1],
+                        "payload_bytes": ipv4.payload.len().saturating_sub(8),
+                    }));
+                }
+                collect_payload_findings(
+                    packet.index,
+                    "icmp",
+                    &ipv4.src,
+                    &ipv4.dst,
+                    ipv4.payload,
+                    &mut interesting_strings,
+                    &mut embedded_signatures,
+                );
+            }
+            6 => {
+                bump_count(&mut protocol_counts, "tcp");
+                if let Some(tcp) = parse_tcp_segment(ipv4.payload) {
+                    tcp_payload_bytes += tcp.payload.len();
+                    update_flow(
+                        &mut flows,
+                        PcapFlowObservation {
+                            protocol: "tcp",
+                            src: &ipv4.src,
+                            src_port: tcp.src_port,
+                            dst: &ipv4.dst,
+                            dst_port: tcp.dst_port,
+                            packet_index: packet.index,
+                            payload_bytes: tcp.payload.len(),
+                        },
+                    );
+                    if looks_like_http_payload(tcp.payload) {
+                        bump_count(&mut protocol_counts, "http");
+                        if let Some(item) = http_summary(packet.index, &ipv4.src, &ipv4.dst, &tcp) {
+                            http_items.push(item);
+                        }
+                    }
+                    collect_payload_findings(
+                        packet.index,
+                        "tcp",
+                        &ipv4.src,
+                        &ipv4.dst,
+                        tcp.payload,
+                        &mut interesting_strings,
+                        &mut embedded_signatures,
+                    );
+                }
+            }
+            17 => {
+                bump_count(&mut protocol_counts, "udp");
+                if let Some(udp) = parse_udp_segment(ipv4.payload) {
+                    udp_payload_bytes += udp.payload.len();
+                    update_flow(
+                        &mut flows,
+                        PcapFlowObservation {
+                            protocol: "udp",
+                            src: &ipv4.src,
+                            src_port: udp.src_port,
+                            dst: &ipv4.dst,
+                            dst_port: udp.dst_port,
+                            packet_index: packet.index,
+                            payload_bytes: udp.payload.len(),
+                        },
+                    );
+                    if udp.src_port == 53 || udp.dst_port == 53 {
+                        bump_count(&mut protocol_counts, "dns");
+                        for query in parse_dns_queries(udp.payload) {
+                            dns_queries.push(serde_json::json!({
+                                "packet": packet.index,
+                                "src": ipv4.src,
+                                "dst": ipv4.dst,
+                                "src_port": udp.src_port,
+                                "dst_port": udp.dst_port,
+                                "query": query,
+                            }));
+                        }
+                    }
+                    collect_payload_findings(
+                        packet.index,
+                        "udp",
+                        &ipv4.src,
+                        &ipv4.dst,
+                        udp.payload,
+                        &mut interesting_strings,
+                        &mut embedded_signatures,
+                    );
+                }
+            }
+            other => {
+                bump_count(&mut protocol_counts, &format!("ip_proto_{other}"));
+                collect_payload_findings(
+                    packet.index,
+                    "ip",
+                    &ipv4.src,
+                    &ipv4.dst,
+                    ipv4.payload,
+                    &mut interesting_strings,
+                    &mut embedded_signatures,
+                );
+            }
+        }
+    }
+
+    let mut flows = flows.into_values().collect::<Vec<_>>();
+    flows.sort_by(|a, b| {
+        b.payload_bytes
+            .cmp(&a.payload_bytes)
+            .then_with(|| b.packets.cmp(&a.packets))
+    });
+    let flow_values = flows
+        .into_iter()
+        .take(32)
+        .map(|flow| {
+            serde_json::json!({
+                "protocol": flow.protocol,
+                "src": flow.src,
+                "dst": flow.dst,
+                "src_port": flow.src_port,
+                "dst_port": flow.dst_port,
+                "packets": flow.packets,
+                "payload_bytes": flow.payload_bytes,
+                "first_packet": flow.first_packet,
+                "last_packet": flow.last_packet,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let endpoint_values = endpoints
+        .into_iter()
+        .map(|(ip, stats)| {
+            serde_json::json!({
+                "ip": ip,
+                "sent_packets": stats.sent_packets,
+                "sent_bytes": stats.sent_bytes,
+                "received_packets": stats.received_packets,
+                "received_bytes": stats.received_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    interesting_strings.truncate(32);
+    embedded_signatures.truncate(32);
+    http_items.truncate(64);
+    dns_queries.truncate(64);
+    icmp_messages.truncate(64);
+
+    serde_json::json!({
+        "summary": {
+            "file_bytes": bytes.len(),
+            "packets": packets.len(),
+            "linktype": packets.first().map(|packet| packet.linktype),
+            "captured_bytes": packets.iter().map(|packet| packet.data.len()).sum::<usize>(),
+            "original_bytes": packets.iter().map(|packet| packet.original_len).sum::<usize>(),
+            "duration_seconds": pcap_duration_seconds(packets),
+            "tcp_payload_bytes": tcp_payload_bytes,
+            "udp_payload_bytes": udp_payload_bytes,
+        },
+        "protocols": protocol_counts,
+        "endpoints": endpoint_values,
+        "flows": flow_values,
+        "http": http_items,
+        "dns": dns_queries,
+        "icmp": icmp_messages,
+        "interesting_strings": interesting_strings,
+        "embedded_signatures": embedded_signatures,
+        "notes": [
+            "Rust analyzer handles classic pcap with Ethernet or raw IPv4. TCP payloads are summarized per packet; full stream reassembly can be added behind tshark/scapy plugin support.",
+            "Use HTTP/DNS/ICMP specialized tools for focused extraction when a section is non-empty."
+        ],
+    })
+}
+
+fn bump_count(counts: &mut BTreeMap<String, usize>, key: &str) {
+    *counts.entry(key.to_string()).or_default() += 1;
+}
+
+fn track_endpoint(
+    endpoints: &mut BTreeMap<String, EndpointStats>,
+    ip: &str,
+    sent: bool,
+    byte_count: usize,
+) {
+    let stats = endpoints.entry(ip.to_string()).or_default();
+    if sent {
+        stats.sent_packets += 1;
+        stats.sent_bytes += byte_count;
+    } else {
+        stats.received_packets += 1;
+        stats.received_bytes += byte_count;
+    }
+}
+
+fn update_flow(flows: &mut BTreeMap<String, PcapFlowStats>, observation: PcapFlowObservation<'_>) {
+    let key = format!(
+        "{} {}:{} -> {}:{}",
+        observation.protocol,
+        observation.src,
+        observation.src_port,
+        observation.dst,
+        observation.dst_port
+    );
+    let flow = flows.entry(key).or_insert_with(|| PcapFlowStats {
+        protocol: observation.protocol.to_string(),
+        src: observation.src.to_string(),
+        dst: observation.dst.to_string(),
+        src_port: observation.src_port,
+        dst_port: observation.dst_port,
+        packets: 0,
+        payload_bytes: 0,
+        first_packet: observation.packet_index,
+        last_packet: observation.packet_index,
+    });
+    flow.packets += 1;
+    flow.payload_bytes += observation.payload_bytes;
+    flow.last_packet = observation.packet_index;
+}
+
+fn pcap_duration_seconds(packets: &[PcapPacket]) -> Option<f64> {
+    let first = packets.first()?;
+    let last = packets.last()?;
+    let start = first.ts_sec as f64 + first.ts_usec as f64 / 1_000_000.0;
+    let end = last.ts_sec as f64 + last.ts_usec as f64 / 1_000_000.0;
+    Some((end - start).max(0.0))
+}
+
+fn looks_like_http_payload(payload: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(payload);
+    let first_line = text.lines().next().unwrap_or_default();
+    first_line.starts_with("HTTP/1.")
+        || [
+            "GET ", "POST ", "PUT ", "DELETE ", "PATCH ", "HEAD ", "OPTIONS ",
+        ]
+        .iter()
+        .any(|method| first_line.starts_with(method))
+}
+
+fn http_summary(
+    packet_index: usize,
+    src: &str,
+    dst: &str,
+    tcp: &TcpSegment<'_>,
+) -> Option<serde_json::Value> {
+    let text = String::from_utf8_lossy(tcp.payload);
+    let first_line = text.lines().next()?.trim().to_string();
+    if first_line.is_empty() {
+        return None;
+    }
+    let host = text
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Host:")
+                .or_else(|| line.strip_prefix("host:"))
+        })
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(ToString::to_string);
+    Some(serde_json::json!({
+        "packet": packet_index,
+        "src": src,
+        "dst": dst,
+        "src_port": tcp.src_port,
+        "dst_port": tcp.dst_port,
+        "line": first_line,
+        "host": host,
+        "payload_bytes": tcp.payload.len(),
+    }))
+}
+
+fn collect_payload_findings(
+    packet_index: usize,
+    protocol: &str,
+    src: &str,
+    dst: &str,
+    payload: &[u8],
+    interesting_strings: &mut Vec<serde_json::Value>,
+    embedded_signatures: &mut Vec<serde_json::Value>,
+) {
+    if payload.is_empty() {
+        return;
+    }
+    for item in extract_printable_strings(payload, 4, 16) {
+        let lower = item.to_ascii_lowercase();
+        if CTF_STEGO_KEYWORDS
+            .iter()
+            .any(|keyword| lower.contains(keyword))
+            || has_wrapped_payload(&item)
+        {
+            interesting_strings.push(serde_json::json!({
+                "packet": packet_index,
+                "protocol": protocol,
+                "src": src,
+                "dst": dst,
+                "preview": preview_text(&item, 160),
+            }));
+        }
+    }
+
+    for (name, signature) in FILE_SIGNATURES {
+        for offset in find_all_subsequences(payload, signature) {
+            embedded_signatures.push(serde_json::json!({
+                "packet": packet_index,
+                "protocol": protocol,
+                "src": src,
+                "dst": dst,
+                "signature": name,
+                "payload_offset": offset,
+            }));
+        }
+    }
 }
 
 fn usb_hid_keys(_spec: &OperationSpec, request: &OperationRequest) -> Result<OperationResponse> {
@@ -868,7 +1216,11 @@ enum Endian {
 
 #[derive(Debug, Clone)]
 struct PcapPacket {
+    index: usize,
     linktype: u32,
+    ts_sec: u32,
+    ts_usec: u32,
+    original_len: usize,
     data: Vec<u8>,
 }
 
@@ -905,6 +1257,38 @@ struct TcpFlowSummary {
     payload_bytes: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+struct EndpointStats {
+    sent_packets: usize,
+    sent_bytes: usize,
+    received_packets: usize,
+    received_bytes: usize,
+}
+
+#[derive(Debug, Clone)]
+struct PcapFlowStats {
+    protocol: String,
+    src: String,
+    dst: String,
+    src_port: u16,
+    dst_port: u16,
+    packets: usize,
+    payload_bytes: usize,
+    first_packet: usize,
+    last_packet: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PcapFlowObservation<'a> {
+    protocol: &'a str,
+    src: &'a str,
+    src_port: u16,
+    dst: &'a str,
+    dst_port: u16,
+    packet_index: usize,
+    payload_bytes: usize,
+}
+
 #[derive(Debug, Clone)]
 struct HidKey {
     name: String,
@@ -930,15 +1314,24 @@ fn parse_pcap_packets(bytes: &[u8]) -> Result<Vec<PcapPacket>> {
     let mut offset = 24;
     let mut packets = Vec::new();
     while offset + 16 <= bytes.len() {
+        let ts_sec = read_u32(bytes, offset, endian).unwrap_or_default();
+        let ts_usec = read_u32(bytes, offset + 4, endian).unwrap_or_default();
         let Some(incl_len) = read_u32(bytes, offset + 8, endian).map(|value| value as usize) else {
             break;
         };
+        let original_len = read_u32(bytes, offset + 12, endian)
+            .map(|value| value as usize)
+            .unwrap_or(incl_len);
         offset += 16;
         if offset + incl_len > bytes.len() {
             break;
         }
         packets.push(PcapPacket {
+            index: packets.len(),
             linktype,
+            ts_sec,
+            ts_usec,
+            original_len,
             data: bytes[offset..offset + incl_len].to_vec(),
         });
         offset += incl_len;
@@ -1173,6 +1566,52 @@ mod tests {
         }
     }
 
+    fn pcap_with_frame(frame: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&[0xd4, 0xc3, 0xb2, 0xa1]);
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&65_535u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&(frame.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&(frame.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(frame);
+        bytes
+    }
+
+    fn ethernet_ipv4_tcp_packet(payload: &[u8]) -> Vec<u8> {
+        let total_len = 20 + 20 + payload.len();
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&[0, 1, 2, 3, 4, 5]);
+        frame.extend_from_slice(&[6, 7, 8, 9, 10, 11]);
+        frame.extend_from_slice(&0x0800u16.to_be_bytes());
+        frame.push(0x45);
+        frame.push(0);
+        frame.extend_from_slice(&(total_len as u16).to_be_bytes());
+        frame.extend_from_slice(&0u16.to_be_bytes());
+        frame.extend_from_slice(&0u16.to_be_bytes());
+        frame.push(64);
+        frame.push(6);
+        frame.extend_from_slice(&0u16.to_be_bytes());
+        frame.extend_from_slice(&[10, 0, 0, 1]);
+        frame.extend_from_slice(&[10, 0, 0, 2]);
+        frame.extend_from_slice(&12_345u16.to_be_bytes());
+        frame.extend_from_slice(&80u16.to_be_bytes());
+        frame.extend_from_slice(&0u32.to_be_bytes());
+        frame.extend_from_slice(&0u32.to_be_bytes());
+        frame.push(0x50);
+        frame.push(0x18);
+        frame.extend_from_slice(&1024u16.to_be_bytes());
+        frame.extend_from_slice(&0u16.to_be_bytes());
+        frame.extend_from_slice(&0u16.to_be_bytes());
+        frame.extend_from_slice(payload);
+        frame
+    }
+
     #[test]
     fn hex_view_displays_ascii() {
         let response =
@@ -1192,6 +1631,22 @@ mod tests {
         )
         .expect("pcap extract");
         assert!(response.outputs[0].value.contains("GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn pcap_analyze_reports_http_flow_and_flag_string() {
+        let payload = b"GET /flag HTTP/1.1\r\nHost: ctf.local\r\n\r\nflag{pcap}";
+        let frame = ethernet_ipv4_tcp_packet(payload);
+        let bytes = pcap_with_frame(&frame);
+        let packets = parse_pcap_packets(&bytes).expect("pcap packets");
+        let report = analyze_pcap(&bytes, &packets);
+        let text = serde_json::to_string(&report).expect("json");
+
+        assert!(text.contains("GET /flag HTTP/1.1"));
+        assert!(text.contains("flag{pcap}"));
+        assert!(text.contains("\"tcp\""));
+        assert!(text.contains("10.0.0.1"));
+        assert!(text.contains("ctf.local"));
     }
 
     #[test]
